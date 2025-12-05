@@ -1,0 +1,7 @@
+{
+  "name": "ChromaCanvas",
+  "description": "A next-generation, infinite canvas video editor powered by AI. Drag, drop, overlap, and craft masterful videos with an intuitive spatial timeline.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
