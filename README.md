@@ -1,3 +1,4 @@
+
 # ChromaCanvas 🎨🎬
 
 > A next-generation, AI-powered infinite canvas video editor & recording studio.
@@ -35,11 +36,17 @@ A powerful environment to capture raw footage before editing.
 *   **Fit-to-Source**: Auto-resize windows to match the aspect ratio of the input device (e.g., vertical phone camera).
 *   **Auto-Save**: All recordings are automatically saved to the Editor Gallery.
 
+### 📡 Real-Time Streaming
+Broadcast your Recorder Studio canvas directly to **Twitch** or **YouTube**.
+*   Requires the local relay server (see below).
+*   Composites all windows (Webcams, Games, Whiteboard) into a single 1080p stream.
+
 ## 🚀 Getting Started
 
 ### Prerequisites
 *   Node.js (v18+)
 *   Google Gemini API Key (for AI features)
+*   **FFmpeg** (Required for Real Streaming)
 
 ### Installation
 
@@ -68,6 +75,25 @@ A powerful environment to capture raw footage before editing.
     ```
     Open [http://localhost:3000](http://localhost:3000).
 
+### 📡 Setting up Real Streaming (Optional)
+
+To enable streaming to Twitch/YouTube, you must run the local relay server.
+
+1.  **Install extra dependencies**
+    ```bash
+    npm install ws
+    ```
+
+2.  **Start the Relay Server**
+    ```bash
+    node streaming-server.js
+    ```
+
+3.  **Go Live**
+    *   Open ChromaCanvas -> Recorder Studio.
+    *   Click **Stream**, enter your Twitch Stream Key, and Go Live.
+    *   *Note: If the server is not running, the app will simulate streaming by saving a local file.*
+
 ## 🎮 Controls & Shortcuts
 
 | Action | Shortcut / Control |
@@ -86,6 +112,7 @@ A powerful environment to capture raw footage before editing.
 *   **Styling**: Tailwind CSS
 *   **AI**: Google GenAI SDK (`@google/genai`)
 *   **Media**: Native `MediaStream`, `MediaRecorder`, and `Web Audio API`
+*   **Streaming**: Node.js WebSocket Relay + FFmpeg
 *   **Icons**: Lucide React
 
 ---

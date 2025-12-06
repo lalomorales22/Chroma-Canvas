@@ -82,6 +82,10 @@ const createChromaKeyStream = (sourceStream: MediaStream): { stream: MediaStream
 export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }) => {
     const [streams, setStreams] = useState<ActiveStream[]>([]);
     const [isRecording, setIsRecording] = useState(false);
+    const [isStreaming, setIsStreaming] = useState(false);
+    const [streamStatus, setStreamStatus] = useState<'offline' | 'connecting' | 'live' | 'error'>('offline');
+    const [showStreamSettings, setShowStreamSettings] = useState(false);
+    const [streamConfig, setStreamConfig] = useState({ url: 'rtmp://live.twitch.tv/app/', key: '' });
     const [recordingTime, setRecordingTime] = useState(0);
     
     // Devices
@@ -115,6 +119,11 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
     const mediaRecordersRef = useRef<Map<string, MediaRecorder>>(new Map());
     const recordedChunksRef = useRef<Map<string, Blob[]>>(new Map());
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const streamRecorderRef = useRef<MediaRecorder | null>(null);
+    const streamChunksRef = useRef<Blob[]>([]);
+    const wsRef = useRef<WebSocket | null>(null);
+
+    const containerRef = useRef<HTMLDivElement>(null);
 
     // Get Devices
     useEffect(() => {
@@ -297,7 +306,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
     };
 
     const switchStreamSource = async (streamId: string, deviceId: string) => {
-        if (isRecording) return; 
+        if (isRecording || isStreaming) return; 
 
         const existingStream = streams.find(s => s.id === streamId);
         if (!existingStream) return;
@@ -378,6 +387,8 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
         setContextMenu(null);
     };
 
+    // --- Recording Logic ---
+
     const startRecording = () => {
         if (streams.length === 0) return;
 
@@ -385,7 +396,6 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
         recordedChunksRef.current.clear();
 
         streams.forEach(s => {
-            // Whiteboard might use canvas capture stream which supports video/webm
             const mimeType = s.type === 'AUDIO' ? 'audio/webm' : 'video/webm;codecs=vp9';
             const options = MediaRecorder.isTypeSupported(mimeType) ? { mimeType } : undefined;
             
@@ -444,17 +454,139 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
         });
 
         await Promise.all(promises);
-        
-        // Stop all tracks to clean up hardware
-        streams.forEach(s => {
-            s.stream.getTracks().forEach(t => t.stop());
-            if(s.originalStream) s.originalStream.getTracks().forEach(t => t.stop());
-            // Clear processors
-            if (chromaProcessors.current.has(s.id)) chromaProcessors.current.get(s.id)?.stop();
-        });
-        
         onSave(newLibraryItems);
     };
+
+    // --- Streaming Logic (Compositor + WebSocket) ---
+
+    const startStreaming = () => {
+        if (!streamConfig.url || !streamConfig.key) {
+            alert("Please enter Stream URL and Key.");
+            return;
+        }
+
+        setShowStreamSettings(false);
+        setStreamStatus('connecting');
+
+        // Setup Compositor
+        const canvas = document.createElement('canvas');
+        const container = containerRef.current;
+        if (!container) return;
+        
+        canvas.width = 1920; 
+        canvas.height = 1080;
+        const ctx = canvas.getContext('2d', { alpha: false });
+        if (!ctx) return;
+
+        // Composite Loop
+        let active = true;
+        const tick = () => {
+            if (!active) return;
+            
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const containerWidth = container.offsetWidth;
+            const containerHeight = container.offsetHeight;
+            const scaleX = canvas.width / containerWidth;
+            const scaleY = canvas.height / containerHeight;
+
+            streams.forEach(s => {
+                if (s.type === 'AUDIO') return;
+                const element = document.getElementById(`source-${s.id}`) as HTMLVideoElement | HTMLCanvasElement;
+                if (element) {
+                    ctx.drawImage(element, s.x * scaleX, s.y * scaleY, s.width * scaleX, s.height * scaleY);
+                }
+            });
+
+            requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+
+        // Capture Master Stream
+        const masterStream = canvas.captureStream(30);
+        streams.forEach(s => {
+             s.stream.getAudioTracks().forEach(track => masterStream.addTrack(track));
+        });
+
+        // Try Connecting to Relay Server
+        const ws = new WebSocket('ws://localhost:4000');
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+            console.log("Connected to Relay Server");
+            ws.send(JSON.stringify(streamConfig));
+            setStreamStatus('live');
+        };
+
+        ws.onerror = () => {
+            console.warn("Relay Server not found. Falling back to local archive only.");
+            setStreamStatus('error');
+            // We continue recording locally even if stream fails
+        };
+
+        // Start Recording the Master Stream
+        // Note: For streaming we want smaller chunks more often
+        const mimeType = 'video/webm;codecs=vp9'; // Chrome standard
+        const options = MediaRecorder.isTypeSupported(mimeType) ? { mimeType } : undefined;
+        
+        try {
+            const recorder = new MediaRecorder(masterStream, options);
+            streamChunksRef.current = [];
+            
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    // 1. Save to local archive
+                    streamChunksRef.current.push(e.data);
+                    
+                    // 2. Send to WebSocket Relay
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(e.data);
+                    }
+                }
+            };
+            
+            recorder.onstop = () => {
+                // Save the "Stream Archive"
+                const blob = new Blob(streamChunksRef.current, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                onSave([{
+                    id: Math.random().toString(36),
+                    type: ElementType.VIDEO,
+                    src: url,
+                    name: `Stream Archive (${new Date().toLocaleTimeString()})`,
+                    category: 'VIDEO',
+                    duration: recordingTime
+                }]);
+                
+                // Cleanup
+                active = false;
+                masterStream.getTracks().forEach(t => t.stop());
+                if (ws.readyState === WebSocket.OPEN) ws.close();
+            };
+
+            recorder.start(100); // 100ms chunks for lower latency streaming
+            streamRecorderRef.current = recorder;
+            setIsStreaming(true);
+            setRecordingTime(0);
+            timerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
+
+        } catch(e) {
+            console.error("Stream recorder failed", e);
+            setIsStreaming(false);
+            active = false;
+        }
+    };
+
+    const stopStreaming = () => {
+        if (timerRef.current) clearInterval(timerRef.current);
+        setIsStreaming(false);
+        setStreamStatus('offline');
+        if (streamRecorderRef.current && streamRecorderRef.current.state !== 'inactive') {
+            streamRecorderRef.current.stop();
+        }
+    };
+
 
     // --- Events ---
 
@@ -557,7 +689,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
             {/* Header */}
             <div className="h-16 border-b border-white/10 flex items-center justify-between px-6 bg-[#18181b]">
                 <div className="flex items-center gap-4">
-                    <button onClick={onBack} disabled={isRecording} className="p-2 hover:bg-white/10 rounded-full disabled:opacity-50">
+                    <button onClick={onBack} disabled={isRecording || isStreaming} className="p-2 hover:bg-white/10 rounded-full disabled:opacity-50">
                         <Icons.Back className="text-white" />
                     </button>
                     <h1 className="text-xl font-bold flex items-center gap-2">
@@ -567,29 +699,42 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                 </div>
                 
                 <div className="flex items-center gap-4">
-                    {isRecording && (
-                        <div className="flex items-center gap-2 text-red-500 font-mono text-xl animate-pulse">
-                            <div className="w-3 h-3 bg-red-500 rounded-full" />
-                            {formatTime(recordingTime)}
+                    {(isRecording || isStreaming) && (
+                        <div className="flex items-center gap-2 font-mono text-xl animate-pulse">
+                            <div className={`w-3 h-3 rounded-full ${isStreaming ? 'bg-purple-500' : 'bg-red-500'}`} />
+                            <span className={isStreaming ? 'text-purple-500' : 'text-red-500'}>
+                                {isStreaming ? 'LIVE' : 'REC'} {formatTime(recordingTime)}
+                            </span>
                         </div>
                     )}
                     
-                    {!isRecording ? (
+                    {!isRecording && !isStreaming && (
+                        <>
+                            <button 
+                                onClick={() => setShowStreamSettings(true)}
+                                className="flex items-center gap-2 bg-[#27272a] hover:bg-[#3f3f46] text-purple-400 px-4 py-2 rounded-full font-bold transition-all border border-purple-500/30"
+                            >
+                                <Icons.Signal size={16} />
+                                Stream
+                            </button>
+                            <button 
+                                onClick={startRecording}
+                                disabled={streams.length === 0}
+                                className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-full font-bold transition-all"
+                            >
+                                <Icons.Circle size={16} fill="currentColor" />
+                                Start Recording
+                            </button>
+                        </>
+                    )}
+                    
+                    {(isRecording || isStreaming) && (
                         <button 
-                            onClick={startRecording}
-                            disabled={streams.length === 0}
-                            className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-full font-bold transition-all"
-                        >
-                            <Icons.Circle size={16} fill="currentColor" />
-                            Start Recording
-                        </button>
-                    ) : (
-                        <button 
-                            onClick={stopRecording}
+                            onClick={isStreaming ? stopStreaming : stopRecording}
                             className="flex items-center gap-2 bg-white hover:bg-gray-200 text-black px-6 py-2 rounded-full font-bold transition-all"
                         >
                             <Icons.Square size={16} fill="currentColor" />
-                            Stop & Save
+                            Stop {isStreaming ? 'Streaming' : 'Recording'}
                         </button>
                     )}
                 </div>
@@ -667,6 +812,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
 
                 {/* Main Studio Canvas */}
                 <div 
+                    ref={containerRef}
                     className="flex-1 relative bg-[#0f0f11] overflow-hidden"
                     style={{ backgroundImage: 'radial-gradient(#27272a 1px, transparent 1px)', backgroundSize: '24px 24px' }}
                     onDragOver={handleCanvasDragOver}
@@ -720,13 +866,14 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                                     </div>
                                 ) : stream.type === 'WHITEBOARD' ? (
                                     <WhiteboardWindow 
+                                        id={`source-${stream.id}`}
                                         width={stream.width} 
                                         height={stream.height} 
                                         onStreamReady={(s) => updateWhiteboardStream(stream.id, s)}
                                         isDraggable={stream.isDraggable !== false}
                                     />
                                 ) : (
-                                    <StreamVideoPreview stream={stream.stream} />
+                                    <StreamVideoPreview id={`source-${stream.id}`} stream={stream.stream} />
                                 )}
                             </div>
                             
@@ -752,6 +899,65 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                     ))}
                 </div>
             </div>
+
+            {/* Stream Settings Modal */}
+            {showStreamSettings && (
+                <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center">
+                    <div className="bg-[#18181b] border border-white/10 rounded-xl p-6 w-96 shadow-2xl">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-bold text-white flex items-center gap-2"><Icons.Signal size={18} className="text-purple-500" /> Stream Settings</h2>
+                            <button onClick={() => setShowStreamSettings(false)}><Icons.X size={18} className="text-gray-400 hover:text-white" /></button>
+                        </div>
+                        
+                        <div className="space-y-4">
+                            <div className="space-y-1">
+                                <label className="text-xs text-gray-400 uppercase">Stream URL (RTMP)</label>
+                                <input 
+                                    type="text" 
+                                    placeholder="rtmp://live.twitch.tv/app/"
+                                    className="w-full bg-[#27272a] border border-white/10 rounded p-2 text-sm text-white focus:border-purple-500 focus:outline-none"
+                                    value={streamConfig.url}
+                                    onChange={e => setStreamConfig({...streamConfig, url: e.target.value})}
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs text-gray-400 uppercase">Stream Key</label>
+                                <input 
+                                    type="password" 
+                                    placeholder="••••••••••••"
+                                    className="w-full bg-[#27272a] border border-white/10 rounded p-2 text-sm text-white focus:border-purple-500 focus:outline-none"
+                                    value={streamConfig.key}
+                                    onChange={e => setStreamConfig({...streamConfig, key: e.target.value})}
+                                />
+                            </div>
+                            
+                            <div className="bg-yellow-900/20 border border-yellow-500/20 p-3 rounded text-[10px] text-yellow-200">
+                                <strong>Important:</strong> Browser-based RTMP streaming requires a <b>Local Relay Server</b>.
+                                <br/><br/>
+                                1. Install dependencies: <code>npm install ws</code>
+                                <br/>
+                                2. Run: <code>node streaming-server.js</code>
+                                <br/>
+                                3. Ensure <b>ffmpeg</b> is installed on your system.
+                            </div>
+
+                            <button 
+                                onClick={startStreaming}
+                                className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 rounded-lg flex items-center justify-center gap-2"
+                            >
+                                <Icons.Signal size={16} /> Go Live
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Error Toast */}
+            {streamStatus === 'error' && isStreaming && (
+                <div className="fixed bottom-4 left-4 bg-red-900/80 border border-red-500 text-white px-4 py-2 rounded-lg text-xs z-[100] animate-bounce">
+                    ⚠️ Relay Server Offline. Streaming is simulated (Archive Only).
+                </div>
+            )}
 
             {/* Context Menu */}
             {contextMenu && contextMenu.visible && (
@@ -844,22 +1050,23 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
     );
 };
 
-const StreamVideoPreview: React.FC<{ stream: MediaStream }> = ({ stream }) => {
+const StreamVideoPreview: React.FC<{ stream: MediaStream, id: string }> = ({ stream, id }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     useEffect(() => {
         if (videoRef.current && stream) {
             videoRef.current.srcObject = stream;
         }
     }, [stream]);
-    return <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover bg-black" />;
+    return <video id={id} ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover bg-black" />;
 };
 
 const WhiteboardWindow: React.FC<{ 
+    id: string,
     width: number, 
     height: number, 
     onStreamReady: (s: MediaStream) => void,
     isDraggable: boolean
-}> = ({ width, height, onStreamReady, isDraggable }) => {
+}> = ({ id, width, height, onStreamReady, isDraggable }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [color, setColor] = useState('#ffffff');
     const [size, setSize] = useState(4);
@@ -950,30 +1157,34 @@ const WhiteboardWindow: React.FC<{
     };
 
     return (
-        <div className="w-full h-full bg-[#1e1e1e] flex flex-col">
+        <div className="w-full h-full bg-[#1e1e1e] flex flex-row">
             {isDrawingMode && (
-                <div className="h-10 bg-[#2d2d2d] flex items-center px-2 gap-2 shrink-0 border-b border-white/5 animate-in slide-in-from-top-2">
-                    <input type="color" value={color} onChange={e => setColor(e.target.value)} className="w-6 h-6 rounded cursor-pointer bg-transparent border-none" disabled={isEraser} />
-                    <input type="range" min="1" max="20" value={size} onChange={e => setSize(Number(e.target.value))} className="w-16 accent-emerald-500" />
+                <div className="w-12 bg-[#2d2d2d] flex flex-col items-center py-2 gap-3 shrink-0 border-r border-white/5 animate-in slide-in-from-left-2 overflow-y-auto custom-scrollbar">
+                    <input type="color" value={color} onChange={e => setColor(e.target.value)} className="w-6 h-6 rounded cursor-pointer bg-transparent border-none shrink-0" disabled={isEraser} />
+                    
+                    <div className="w-full px-1 flex flex-col items-center gap-1">
+                        <span className="text-[8px] text-gray-400">Size</span>
+                        <input type="range" min="1" max="20" value={size} onChange={e => setSize(Number(e.target.value))} className="h-20 w-1 accent-emerald-500 appearance-slider-vertical" style={{ writingMode: 'vertical-lr' }} />
+                    </div>
                     
                     <button 
                             onClick={() => setIsEraser(!isEraser)}
-                            className={`p-1 rounded ${isEraser ? 'bg-white text-black' : 'text-gray-400 hover:text-white'}`}
+                            className={`p-1 rounded shrink-0 ${isEraser ? 'bg-white text-black' : 'text-gray-400 hover:text-white'}`}
                             title="Eraser"
                     >
-                        <div className="w-3 h-3 bg-current rounded-sm border border-current" />
+                        <div className="w-4 h-4 bg-current rounded-sm border border-current" />
                     </button>
                     
                     <button 
-                        className="text-[10px] px-2 py-1 bg-gray-700 text-white rounded hover:bg-gray-600 disabled:opacity-50"
+                        className="text-[10px] w-8 py-1 bg-gray-700 text-white rounded hover:bg-gray-600 disabled:opacity-50 shrink-0"
                         onClick={handleUndo}
                         disabled={undoStack.length <= 1}
                     >
                         Undo
                     </button>
 
-                        <button 
-                        className="text-[10px] px-2 py-1 bg-red-900/50 text-white rounded ml-auto hover:bg-red-900"
+                    <button 
+                        className="text-[10px] w-8 py-1 bg-red-900/50 text-white rounded mt-auto hover:bg-red-900 shrink-0"
                         onClick={() => {
                             const ctx = canvasRef.current?.getContext('2d');
                             if (ctx && canvasRef.current) {
@@ -983,12 +1194,13 @@ const WhiteboardWindow: React.FC<{
                             }
                         }}
                     >
-                        Clear
+                        Clr
                     </button>
                 </div>
             )}
             <div className={`flex-1 relative ${isDrawingMode ? 'cursor-crosshair' : 'cursor-default'}`}>
                 <canvas 
+                    id={id}
                     ref={canvasRef}
                     width={1280}
                     height={720}

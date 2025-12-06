@@ -4,7 +4,7 @@ import {
   Trash2, Layers, Settings, ZoomIn, ZoomOut, Download, Plus,
   Wand2, Volume2, Monitor, Smartphone, GripVertical,
   Copy, Clipboard, Mic, Video, Square, Circle, X, ChevronLeft, Layout,
-  Maximize, Brush
+  Maximize, Brush, Signal
 } from 'lucide-react';
 
 export const Icons = {
@@ -16,5 +16,6 @@ export const Icons = {
   Mic, Video, Square, Circle, X, Back: ChevronLeft, Layout,
   Monitor,
   Maximize,
-  Brush
+  Brush,
+  Signal
 };
