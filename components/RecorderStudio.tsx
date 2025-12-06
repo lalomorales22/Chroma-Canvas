@@ -141,6 +141,111 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
     const wsRef = useRef<WebSocket | null>(null);
 
     const containerRef = useRef<HTMLDivElement>(null);
+    
+    // Profile State
+    const [profiles, setProfiles] = useState<Record<string, ActiveStream[]>>({});
+    const [profileName, setProfileName] = useState('');
+    const [isProfilesOpen, setIsProfilesOpen] = useState(true);
+
+    // Auto-Save/Load Current Layout
+    useEffect(() => {
+        const saved = localStorage.getItem('chroma_studio_layout');
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                // We need to re-instantiate streams that can be recovered (Camera/Mic IDs)
+                // However, MediaStreams cannot be serialized. We restore the *config* and placeholder streams.
+                // Real device re-acquisition would happen here if we wanted full restoration, 
+                // but for now we restore the windows and metadata.
+                // For Camera/Mic, we might need to prompt or auto-reconnect. 
+                // To keep it simple and robust: We restore the windows blank and let user re-select source OR auto-reconnect if deviceId exists.
+                
+                const restored = parsed.map((s: any) => ({
+                    ...s,
+                    stream: new MediaStream(), // Placeholders until reconnected
+                    originalStream: undefined
+                }));
+                
+                setStreams(restored);
+                
+                // Trigger reconnection for devices
+                restored.forEach((s: ActiveStream) => {
+                    if (s.type === 'CAMERA' && s.deviceId) {
+                        navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: s.deviceId } } })
+                            .then(stream => {
+                                setStreams(prev => prev.map(p => p.id === s.id ? { ...p, stream, originalStream: stream } : p));
+                            })
+                            .catch(e => console.warn("Could not restore camera", e));
+                    }
+                    else if (s.type === 'AUDIO' && s.deviceId) {
+                         navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: s.deviceId } } })
+                            .then(stream => {
+                                setStreams(prev => prev.map(p => p.id === s.id ? { ...p, stream } : p));
+                            })
+                            .catch(e => console.warn("Could not restore mic", e));
+                    }
+                     else if (s.type === 'SCREEN') {
+                         // Screen share cannot be auto-restored due to security
+                         // It stays as a placeholder window user can re-activate or delete
+                    }
+                });
+
+            } catch(e) { console.error("Layout restore failed", e); }
+        }
+        
+        const savedProfiles = localStorage.getItem('chroma_studio_profiles');
+        if (savedProfiles) {
+            setProfiles(JSON.parse(savedProfiles));
+        }
+    }, []);
+
+    // Save layout on change
+    useEffect(() => {
+        if (streams.length > 0) {
+            // strip streams
+            const serializable = streams.map(s => ({
+                ...s,
+                stream: undefined,
+                originalStream: undefined
+            }));
+            localStorage.setItem('chroma_studio_layout', JSON.stringify(serializable));
+        }
+    }, [streams]);
+
+    const saveProfile = () => {
+        if (!profileName) return;
+        const serializable = streams.map(s => ({
+                ...s,
+                stream: undefined,
+                originalStream: undefined
+        }));
+        const newProfiles = { ...profiles, [profileName]: serializable };
+        setProfiles(newProfiles);
+        localStorage.setItem('chroma_studio_profiles', JSON.stringify(newProfiles));
+        setProfileName('');
+    };
+
+    const loadProfile = (name: string) => {
+        const p = profiles[name];
+        if (p) {
+             const restored = p.map((s: any) => ({
+                    ...s,
+                    stream: new MediaStream(),
+                    originalStream: undefined
+            }));
+            setStreams(restored);
+            // Reconnect logic similar to initial load...
+             restored.forEach((s: ActiveStream) => {
+                    if (s.type === 'CAMERA' && s.deviceId) {
+                        navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: s.deviceId } } })
+                            .then(stream => {
+                                setStreams(prev => prev.map(p => p.id === s.id ? { ...p, stream, originalStream: stream } : p));
+                            })
+                            .catch(e => console.warn("Could not restore camera", e));
+                    }
+             });
+        }
+    };
 
     // Get Devices
     useEffect(() => {
@@ -829,6 +934,41 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
             <div className="flex-1 flex overflow-hidden">
                 {/* Source Palette Sidebar */}
                 <div className="w-64 bg-black border-r border-zinc-800 p-4 flex flex-col gap-6 overflow-y-auto custom-scrollbar">
+                    {/* Profiles */}
+                     <div>
+                        <button className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-2" onClick={() => setIsProfilesOpen(!isProfilesOpen)}>
+                            <span className="flex items-center gap-2"><Icons.Layout size={10} /> Layout Profiles</span>
+                            <span className="text-gray-600">{isProfilesOpen ? '▼' : '▶'}</span>
+                        </button>
+                        {isProfilesOpen && (
+                            <div className="space-y-2 mb-4">
+                                <div className="flex gap-2">
+                                    <input 
+                                        type="text" 
+                                        value={profileName} 
+                                        onChange={(e) => setProfileName(e.target.value)} 
+                                        placeholder="Profile Name"
+                                        className="w-full bg-black/40 border border-zinc-800 rounded px-2 py-1 text-xs text-white"
+                                    />
+                                    <button onClick={saveProfile} className="bg-lime-800 px-2 rounded text-white text-xs hover:bg-lime-700">Save</button>
+                                </div>
+                                <div className="space-y-1">
+                                    {Object.keys(profiles).map(name => (
+                                        <div key={name} className="flex items-center justify-between text-xs text-gray-300 bg-zinc-900/50 p-1 px-2 rounded hover:bg-zinc-800 cursor-pointer" onClick={() => loadProfile(name)}>
+                                            {name}
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); const newP = {...profiles}; delete newP[name]; setProfiles(newP); localStorage.setItem('chroma_studio_profiles', JSON.stringify(newP)); }}
+                                                className="text-red-500 hover:text-red-300"
+                                            >
+                                                <Icons.Trash size={10} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     <div>
                         <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Add Sources</h3>
                         <div className="space-y-3">
@@ -1424,10 +1564,19 @@ const ThreeDWindow: React.FC<{
 
         loader.load(item.url, (gltf: any) => {
             const model = gltf.scene;
-            // Center Model
+            
+            // Auto-Scale Logic
             const box = new THREE.Box3().setFromObject(model);
             const center = box.getCenter(new THREE.Vector3());
-            model.position.sub(center);
+            const size = box.getSize(new THREE.Vector3());
+            
+            // Calculate scale to fit within a 3x3x3 unit box (visible by default camera at z=5)
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const targetSize = 3; 
+            const scale = targetSize / maxDim;
+            
+            model.position.sub(center); // Center at 0,0,0
+            model.scale.set(scale, scale, scale);
             
             sceneRef.current.add(model);
             modelRef.current = model;
@@ -1444,6 +1593,7 @@ const ThreeDWindow: React.FC<{
 
     return (
         <div 
+            ref={containerRef}
             className="w-full h-full relative"
         >
             <canvas id={id} ref={canvasRef} className="w-full h-full" />
@@ -1693,7 +1843,10 @@ const PianoWindow: React.FC<{
              if (activeSourcesRef.current.has(key)) return; 
              const source = audioCtxRef.current.createBufferSource();
              source.buffer = soundMap[key].buffer;
+             // CONNECT TO DESTINATION (RECORDING) AND SPEAKERS (HEARING)
              source.connect(destRef.current);
+             source.connect(audioCtxRef.current.destination);
+             
              source.start();
              source.onended = () => {
                  activeSourcesRef.current.delete(key);
@@ -1723,7 +1876,10 @@ const PianoWindow: React.FC<{
         gain.gain.exponentialRampToValueAtTime(0.01, audioCtxRef.current.currentTime + 1.5);
 
         osc.connect(gain);
+        
+        // CONNECT TO DESTINATION (RECORDING) AND SPEAKERS (HEARING)
         gain.connect(destRef.current);
+        gain.connect(audioCtxRef.current.destination);
         
         osc.start();
         oscillatorsRef.current.set(key, osc);

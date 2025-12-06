@@ -1,3 +1,4 @@
+
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { EditorState, CanvasElement, ContextMenuState, ElementType } from '../../types';
 import { TRACK_HEIGHT, DEFAULT_ZOOM } from '../../constants';
@@ -31,6 +32,8 @@ export const Timeline: React.FC<TimelineProps> = ({ state, dispatch, onContextMe
     isSelecting: boolean;
   } | null>(null);
 
+  const [isAutoFit, setIsAutoFit] = useState(false);
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
@@ -40,13 +43,22 @@ export const Timeline: React.FC<TimelineProps> = ({ state, dispatch, onContextMe
   const handleFitToScreen = () => {
       if (!containerRef.current) return;
       const width = containerRef.current.clientWidth;
-      // Calculate zoom to fit duration into width
-      // width = duration * zoom  =>  zoom = width / duration
-      // Add some buffer duration
       const targetDuration = Math.max(state.duration, 30);
       const newZoom = (width - 50) / targetDuration; 
       dispatch({ type: 'SET_ZOOM', payload: newZoom });
   };
+
+  // Auto-Fit Effect
+  useEffect(() => {
+      if (isAutoFit && containerRef.current) {
+           const width = containerRef.current.clientWidth;
+           const targetDuration = Math.max(state.duration, 30);
+           const newZoom = (width - 50) / targetDuration; 
+           if (Math.abs(state.zoom - newZoom) > 1) {
+                dispatch({ type: 'SET_ZOOM', payload: newZoom });
+           }
+      }
+  }, [isAutoFit, state.duration, state.elements.length, dispatch]);
 
   const renderRuler = () => {
     const ticks = [];
@@ -75,6 +87,9 @@ export const Timeline: React.FC<TimelineProps> = ({ state, dispatch, onContextMe
       if (e.metaKey || e.ctrlKey) {
         e.preventDefault();
         
+        // Disable Auto Fit if manual zooming happens
+        if (isAutoFit) setIsAutoFit(false);
+        
         // Dampening factor for smooth scroll
         const zoomDelta = -e.deltaY * 0.1;
         const newZoom = state.zoom + zoomDelta;
@@ -85,7 +100,7 @@ export const Timeline: React.FC<TimelineProps> = ({ state, dispatch, onContextMe
 
     container.addEventListener('wheel', handleWheel, { passive: false });
     return () => container.removeEventListener('wheel', handleWheel);
-  }, [state.zoom, dispatch]);
+  }, [state.zoom, dispatch, isAutoFit]);
 
   // --- Element Movement & Resizing ---
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -319,13 +334,22 @@ export const Timeline: React.FC<TimelineProps> = ({ state, dispatch, onContextMe
         {/* Ruler */}
         <div className="sticky top-0 left-0 right-0 h-10 bg-[#18181b] border-b border-white/10 z-30 overflow-hidden flex items-center">
             {renderRuler()}
-            <button 
-                onClick={handleFitToScreen}
-                className="fixed right-8 top-[104px] z-50 bg-black/60 hover:bg-lime-900/80 text-white p-1 rounded border border-white/20 text-[10px] flex items-center gap-1 backdrop-blur"
-                title="Fit Timeline to Screen"
-            >
-                <Icons.Maximize size={10} /> Fit View
-            </button>
+            <div className="fixed right-8 top-[104px] z-50 flex items-center gap-2">
+                 <button 
+                    onClick={() => setIsAutoFit(!isAutoFit)}
+                    className={`p-1 rounded border border-white/20 text-[10px] flex items-center gap-1 backdrop-blur ${isAutoFit ? 'bg-lime-600 text-white' : 'bg-black/60 hover:bg-lime-900/80 text-gray-300'}`}
+                    title="Automatically fit project to screen width"
+                >
+                    <Icons.Layout size={10} /> Auto Fit
+                </button>
+                <button 
+                    onClick={handleFitToScreen}
+                    className="bg-black/60 hover:bg-lime-900/80 text-white p-1 rounded border border-white/20 text-[10px] flex items-center gap-1 backdrop-blur"
+                    title="Fit Timeline to Screen Once"
+                >
+                    <Icons.Maximize size={10} /> Fit View
+                </button>
+            </div>
         </div>
 
         {/* Tracks Area */}

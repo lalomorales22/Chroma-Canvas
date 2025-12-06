@@ -175,6 +175,70 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
   const selectedElement = state.elements.find(e => e.id === selectedElementId);
   const isMultiSelect = state.selectedIds.length > 1;
 
+  // --- Interactive Preview Dragging ---
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  const [previewDrag, setPreviewDrag] = useState<{ id: string, startX: number, startY: number, initialElX: number, initialElY: number } | null>(null);
+
+  const handlePreviewMouseDown = (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      e.preventDefault();
+      
+      // Select if not selected
+      if (!state.selectedIds.includes(id)) {
+          dispatch({ type: 'SELECT_ELEMENT', payload: id });
+      }
+      
+      const el = state.elements.find(e => e.id === id);
+      if (!el) return;
+
+      setPreviewDrag({
+          id,
+          startX: e.clientX,
+          startY: e.clientY,
+          initialElX: el.x || 0,
+          initialElY: el.y || 0
+      });
+  };
+
+  useEffect(() => {
+      const handleMouseMove = (e: MouseEvent) => {
+          if (!previewDrag || !previewContainerRef.current) return;
+          
+          // Calculate scale factor between DOM preview and Canvas Resolution (1280 or 720)
+          const rect = previewContainerRef.current.getBoundingClientRect();
+          const canvasBaseWidth = state.canvasMode === 'landscape' ? 1280 : 720;
+          const scaleFactor = canvasBaseWidth / rect.width;
+
+          const deltaX = (e.clientX - previewDrag.startX) * scaleFactor;
+          const deltaY = (e.clientY - previewDrag.startY) * scaleFactor;
+
+          dispatch({
+              type: 'UPDATE_ELEMENT',
+              payload: {
+                  id: previewDrag.id,
+                  changes: {
+                      x: previewDrag.initialElX + deltaX,
+                      y: previewDrag.initialElY + deltaY
+                  }
+              }
+          });
+      };
+
+      const handleMouseUp = () => {
+          setPreviewDrag(null);
+      };
+
+      if (previewDrag) {
+          window.addEventListener('mousemove', handleMouseMove);
+          window.addEventListener('mouseup', handleMouseUp);
+      }
+      return () => {
+          window.removeEventListener('mousemove', handleMouseMove);
+          window.removeEventListener('mouseup', handleMouseUp);
+      };
+  }, [previewDrag, state.canvasMode, dispatch]);
+
+
   // Playback Control
   const togglePlay = () => dispatch({ type: 'TOGGLE_PLAY' });
 
@@ -271,12 +335,13 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       if (!aiPrompt) return;
       setIsGenerating(true);
 
-      let finalPrompt: string = String(aiPrompt);
-      let finalName: string = String(aiPrompt);
+      const promptStr = String(aiPrompt);
+      let finalPrompt: string = promptStr;
+      let finalName: string = promptStr;
       
       if (type === 'text') {
-          finalPrompt = `Typography design of the word "${aiPrompt}" in a colorful, fun, creative graffiti style, isolated on a white background. Vector art sticker.`;
-          finalName = `Art: ${aiPrompt}`;
+          finalPrompt = `Typography design of the word "${promptStr}" in a colorful, fun, creative graffiti style, isolated on a white background. Vector art sticker.`;
+          finalName = `Art: ${promptStr}`;
       }
 
       const imageUrl = await generateImage(finalPrompt);
@@ -619,6 +684,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       
       <div className="aspect-video bg-[#0f0f11] relative flex items-center justify-center overflow-hidden border-b border-zinc-800 shrink-0">
          <div 
+            ref={previewContainerRef}
             className="w-full h-full relative"
             style={{ 
                 width: state.canvasMode === 'portrait' ? 'auto' : '100%',
@@ -644,18 +710,19 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                         ) : (
                             (state.currentTime >= el.startTime && state.currentTime < el.startTime + el.duration) && (
                                 <div 
-                                    className="absolute inset-0 flex items-center justify-center transition-all"
+                                    className="absolute inset-0 flex items-center justify-center transition-all cursor-move hover:ring-1 hover:ring-lime-500/50"
+                                    onMouseDown={(e) => handlePreviewMouseDown(e, el.id)}
                                     style={{
                                         opacity: el.opacity,
                                         transform: `translate(${el.x || 0}px, ${el.y || 0}px) scale(${el.scale}) rotate(${el.rotation}deg)`
                                     }}
                                 >
                                     {el.type === ElementType.IMAGE && (
-                                        <img src={el.src} className="w-full h-full object-contain" alt="" />
+                                        <img src={el.src} className="w-full h-full object-contain pointer-events-none" alt="" />
                                     )}
                                     {el.type === ElementType.TEXT && (
                                         <h1 
-                                            className="font-bold text-white drop-shadow-lg text-center leading-tight whitespace-pre-wrap px-4" 
+                                            className="font-bold text-white drop-shadow-lg text-center leading-tight whitespace-pre-wrap px-4 pointer-events-none" 
                                             style={{ 
                                                 fontFamily: 'Inter',
                                                 fontSize: `${el.fontSize || 40}px`
@@ -672,11 +739,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
              }
          </div>
          
-         <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-4 z-20">
-             <button onClick={() => dispatch({type: 'SET_TIME', payload: 0})} className="p-2 rounded-full bg-black/50 hover:bg-white/20 text-white backdrop-blur">
+         <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-4 z-20 pointer-events-none">
+             <button onClick={() => dispatch({type: 'SET_TIME', payload: 0})} className="pointer-events-auto p-2 rounded-full bg-black/50 hover:bg-white/20 text-white backdrop-blur">
                  <div className="w-3 h-3 border-l-2 border-t-2 border-white transform -rotate-45 ml-1"></div>
              </button>
-             <button onClick={togglePlay} className="p-3 rounded-full bg-white text-black hover:bg-gray-200 shadow-lg">
+             <button onClick={togglePlay} className="pointer-events-auto p-3 rounded-full bg-white text-black hover:bg-gray-200 shadow-lg">
                  {state.isPlaying ? <Icons.Pause size={20} fill="black" /> : <Icons.Play size={20} fill="black" />}
              </button>
          </div>
@@ -780,6 +847,20 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                         <p className="text-[10px] text-gray-300 truncate">{item.name}</p>
                                     </div>
                                 ))}
+                                {getFilteredLibrary('OVERLAY').map(item => (
+                                    <div key={item.id} draggable onDragStart={(e) => { e.dataTransfer.setData('type', item.type); e.dataTransfer.setData('src', item.src); e.dataTransfer.setData('name', item.name); if(item.duration) e.dataTransfer.setData('duration', item.duration.toString())}} className="bg-black border border-zinc-800 p-2 rounded cursor-grab hover:border-lime-500 transition-colors group relative">
+                                        <div className="aspect-video bg-[#0f0f11] mb-1 rounded overflow-hidden relative bg-white/5">
+                                            <img src={item.src} className="w-full h-full object-contain p-1 opacity-100" />
+                                        </div>
+                                        <p className="text-[10px] text-gray-300 truncate">{item.name}</p>
+                                        <button 
+                                            onClick={(e) => handleGalleryContextMenu(e, item.id)}
+                                            className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-400 bg-black/50 rounded-full p-0.5"
+                                        >
+                                            <Icons.X size={10} />
+                                        </button>
+                                    </div>
+                                ))}
                             </div>
                         )}
                         </div>
@@ -823,6 +904,21 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                     <Icons.Plus className="w-6 h-6 text-lime-400 mx-auto mb-2" />
                     <p className="text-xs text-lime-200">Drag or Click to Add PNGs</p>
                     <p className="text-[9px] text-lime-200/50 mt-1">(Supports Paste from Clipboard)</p>
+                </div>
+
+                {/* Overlays List in Overlay Tab */}
+                <div className="grid grid-cols-3 gap-2">
+                    {getFilteredLibrary('OVERLAY').map(item => (
+                        <div key={item.id} draggable onDragStart={(e) => { e.dataTransfer.setData('type', item.type); e.dataTransfer.setData('src', item.src); e.dataTransfer.setData('name', item.name); if(item.duration) e.dataTransfer.setData('duration', item.duration.toString())}} className="aspect-square bg-zinc-900 border border-zinc-800 rounded p-1 cursor-grab hover:border-lime-500 relative group">
+                            <img src={item.src} className="w-full h-full object-contain" />
+                             <button 
+                                onClick={(e) => handleGalleryContextMenu(e, item.id)}
+                                className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-400 bg-black/50 rounded-full p-0.5"
+                            >
+                                <Icons.X size={10} />
+                            </button>
+                        </div>
+                    ))}
                 </div>
 
                 <div>
