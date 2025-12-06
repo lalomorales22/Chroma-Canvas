@@ -128,7 +128,7 @@ const MediaLayer: React.FC<{
                 style={{
                     opacity: isVisible ? element.opacity : 0,
                     pointerEvents: isVisible ? 'auto' : 'none',
-                    transform: `scale(${element.scale}) rotate(${element.rotation}deg)`
+                    transform: `translate(${element.x || 0}px, ${element.y || 0}px) scale(${element.scale}) rotate(${element.rotation}deg)`
                 }}
             >
                 <video 
@@ -147,7 +147,7 @@ const MediaLayer: React.FC<{
 
 export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, width, setWidth }) => {
   const [activeTab, setActiveTab] = useState<'gallery' | 'overlays' | 'properties'>('gallery');
-  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiPrompt, setAiPrompt] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(false);
   const resizeStartRef = useRef<number | null>(null);
   const resizeStartWidthRef = useRef<number | null>(null);
@@ -157,6 +157,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
   const [isVideosOpen, setIsVideosOpen] = useState(true);
   const [isImagesOpen, setIsImagesOpen] = useState(true);
   const [isAudioOpen, setIsAudioOpen] = useState(true);
+
+  // File Inputs
+  const overlayInputRef = useRef<HTMLInputElement>(null);
 
   // Export State
   const [isExporting, setIsExporting] = useState(false);
@@ -174,6 +177,37 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
   // Playback Control
   const togglePlay = () => dispatch({ type: 'TOGGLE_PLAY' });
+
+  // Paste Handler for Overlays
+  useEffect(() => {
+      const handlePaste = async (e: ClipboardEvent) => {
+          if (activeTab !== 'overlays') return;
+          const items = e.clipboardData?.items;
+          if (!items) return;
+
+          for (let i = 0; i < items.length; i++) {
+              if (items[i].type.indexOf("image") !== -1) {
+                  const blob = items[i].getAsFile();
+                  if (blob) {
+                      const url = URL.createObjectURL(blob);
+                      const newItem = {
+                        id: Math.random().toString(36),
+                        type: ElementType.IMAGE,
+                        src: url,
+                        name: "Pasted Image",
+                        category: 'OVERLAY',
+                        duration: DEFAULT_IMAGE_DURATION
+                    };
+                    dispatch({ type: 'ADD_LIBRARY_ITEM', payload: newItem });
+                  }
+              }
+          }
+      };
+
+      window.addEventListener('paste', handlePaste);
+      return () => window.removeEventListener('paste', handlePaste);
+  }, [activeTab, dispatch]);
+
 
   // Resize Handlers
   const startResizing = (e: React.MouseEvent) => {
@@ -237,8 +271,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       if (!aiPrompt) return;
       setIsGenerating(true);
 
-      let finalPrompt = String(aiPrompt);
-      let finalName = String(aiPrompt);
+      let finalPrompt: string = String(aiPrompt);
+      let finalName: string = String(aiPrompt);
       
       if (type === 'text') {
           finalPrompt = `Typography design of the word "${aiPrompt}" in a colorful, fun, creative graffiti style, isolated on a white background. Vector art sticker.`;
@@ -251,8 +285,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
           const newItem = {
               id: Math.random().toString(36),
               type: ElementType.IMAGE,
-              src: imageUrl as string,
-              name: finalName as string,
+              // Fix: Explicitly cast to string to handle potential unknown type
+              src: String(imageUrl),
+              name: String(finalName),
               category: 'IMAGE' as const,
               duration: DEFAULT_IMAGE_DURATION
           };
@@ -265,17 +300,32 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
   };
 
   // File Upload Handler
-  const handleFileUpload = async (e: React.DragEvent<HTMLDivElement>, targetCategory: 'VIDEO' | 'IMAGE' | 'AUDIO' | 'OVERLAY' = 'IMAGE') => {
-      e.preventDefault();
-      e.stopPropagation();
-      const files = Array.from(e.dataTransfer.files) as File[];
+  const handleFileUpload = async (e: React.DragEvent<HTMLDivElement> | React.ChangeEvent<HTMLInputElement>, targetCategory: 'VIDEO' | 'IMAGE' | 'AUDIO' | 'OVERLAY' = 'IMAGE') => {
+      if (e.type === 'drop') {
+          e.preventDefault();
+          e.stopPropagation();
+      }
+      
+      let files: File[] = [];
+      if ('dataTransfer' in e && e.dataTransfer) {
+          files = Array.from(e.dataTransfer.files);
+      } else if ('target' in e && e.target) {
+          // Explicitly check and cast target to avoid unknown type issues with files property
+          const target = e.target as HTMLInputElement;
+          if (target.files) {
+              files = Array.from(target.files);
+          }
+      }
       
       for (const file of files) {
           const url = URL.createObjectURL(file);
           let type: ElementType = ElementType.IMAGE;
           let category = targetCategory;
 
-          if (targetCategory !== 'OVERLAY') {
+          // If strictly uploading to Overlays, treat as Image type but Overlay category
+          if (targetCategory === 'OVERLAY') {
+               type = ElementType.IMAGE;
+          } else {
               if (file.type.startsWith('video/')) {
                   type = ElementType.VIDEO;
                   category = 'VIDEO';
@@ -283,9 +333,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                   type = ElementType.AUDIO;
                   category = 'AUDIO';
               }
-          } else {
-               // Overlays are generally images
-               type = ElementType.IMAGE;
           }
 
           const duration = await getMediaDuration(url, type);
@@ -299,6 +346,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
               duration
           };
           dispatch({ type: 'ADD_LIBRARY_ITEM', payload: newItem });
+      }
+      
+      // Reset input if used
+      if ('target' in e && e.target) {
+          (e.target as HTMLInputElement).value = '';
       }
   };
 
@@ -459,8 +511,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                      }
 
                      ctx.save();
-                     const cx = canvas.width / 2;
-                     const cy = canvas.height / 2;
+                     const cx = canvas.width / 2 + (el.x || 0);
+                     const cy = canvas.height / 2 + (el.y || 0);
                      ctx.translate(cx, cy);
                      ctx.rotate((el.rotation * Math.PI) / 180);
                      ctx.scale(el.scale, el.scale);
@@ -489,9 +541,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                          if (el.src) {
                              const img = imageCache.get(el.src);
                              if (img) { 
-                                  const scale = Math.max(canvas.width / img.width, canvas.height / img.height);
+                                  // CHANGED: Use Math.min for Contain/Fit instead of Math.max for Cover
+                                  const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
                                   const w = img.width * scale;
                                   const h = img.height * scale;
+                                  // Draw centered in the translated context
                                   ctx.drawImage(img, -w/2, -h/2, w, h);
                              }
                          }
@@ -555,7 +609,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
   return (
     <div 
-        className="bg-[#18181b] border-l border-lime-900/30 flex flex-col h-full z-50 shadow-xl relative"
+        className="bg-black border-l border-zinc-800 flex flex-col h-full z-50 shadow-xl relative"
         style={{ width: width }}
     >
       <div 
@@ -563,7 +617,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
         onMouseDown={startResizing}
       />
       
-      <div className="aspect-video bg-black relative flex items-center justify-center overflow-hidden border-b border-white/10 shrink-0">
+      <div className="aspect-video bg-[#0f0f11] relative flex items-center justify-center overflow-hidden border-b border-zinc-800 shrink-0">
          <div 
             className="w-full h-full relative"
             style={{ 
@@ -593,11 +647,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                     className="absolute inset-0 flex items-center justify-center transition-all"
                                     style={{
                                         opacity: el.opacity,
-                                        transform: `scale(${el.scale}) rotate(${el.rotation}deg)`
+                                        transform: `translate(${el.x || 0}px, ${el.y || 0}px) scale(${el.scale}) rotate(${el.rotation}deg)`
                                     }}
                                 >
                                     {el.type === ElementType.IMAGE && (
-                                        <img src={el.src} className="w-full h-full object-cover" alt="" />
+                                        <img src={el.src} className="w-full h-full object-contain" alt="" />
                                     )}
                                     {el.type === ElementType.TEXT && (
                                         <h1 
@@ -628,7 +682,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
          </div>
       </div>
 
-      <div className="flex border-b border-lime-900/30 shrink-0">
+      <div className="flex border-b border-zinc-800 shrink-0">
         <button 
             className={`flex-1 py-3 text-sm font-medium ${activeTab === 'gallery' ? 'text-white border-b-2 border-lime-500' : 'text-gray-400 hover:text-white'}`}
             onClick={() => setActiveTab('gallery')}
@@ -649,11 +703,10 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 custom-scrollbar relative">
-        
+      <div className="flex-1 overflow-y-auto p-4 custom-scrollbar relative bg-black">
         {activeTab === 'gallery' && (
-            <div className="space-y-6">
-                <div className="bg-gradient-to-br from-green-900/40 to-lime-950/40 p-4 rounded-xl border border-lime-500/20">
+             <div className="space-y-6">
+                 <div className="bg-gradient-to-br from-green-900 to-lime-950 p-4 rounded-xl border border-lime-900">
                     <div className="flex items-center gap-2 mb-3 text-lime-400">
                         <Icons.Magic className="w-4 h-4" />
                         <span className="text-xs font-bold uppercase tracking-wider">Gemini Studio</span>
@@ -685,142 +738,91 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                 </div>
 
                 <div 
-                    className="border-2 border-dashed border-white/10 rounded-xl p-6 text-center hover:border-lime-500/50 hover:bg-white/5 transition-colors cursor-pointer"
+                    className="border-2 border-dashed border-zinc-800 rounded-xl p-6 text-center hover:border-lime-500/50 hover:bg-white/5 transition-colors cursor-pointer"
                     onDragOver={(e) => { e.preventDefault(); }}
                     onDrop={(e) => handleFileUpload(e, 'IMAGE')}
                 >
                     <Icons.Download className="w-8 h-8 text-gray-500 mx-auto mb-2" />
                     <p className="text-xs text-gray-400">Drag & Drop media here<br/>to add to Gallery</p>
                 </div>
-
-                <div className="space-y-4">
-                    {/* Videos Section */}
-                    <div>
-                        <button 
-                            className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-2"
-                            onClick={() => setIsVideosOpen(!isVideosOpen)}
-                        >
+                  <div className="space-y-4">
+                        <div>
+                        <button className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-2" onClick={() => setIsVideosOpen(!isVideosOpen)}>
                             <span className="flex items-center gap-2"><Icons.Play size={10} /> Videos</span>
                             <span className="text-gray-600">{isVideosOpen ? '▼' : '▶'}</span>
                         </button>
-                        
                         {isVideosOpen && (
-                            <div className="grid grid-cols-2 gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                            <div className="grid grid-cols-2 gap-2">
                                 {getFilteredLibrary('VIDEO').map(item => (
-                                    <div 
-                                        key={item.id}
-                                        className="bg-[#27272a] p-2 rounded cursor-grab hover:bg-[#3f3f46] transition-colors group relative"
-                                        draggable
-                                        onDragStart={(e) => {
-                                            e.dataTransfer.setData('type', item.type);
-                                            e.dataTransfer.setData('src', item.src);
-                                            e.dataTransfer.setData('name', item.name);
-                                            if (item.duration) e.dataTransfer.setData('duration', item.duration.toString());
-                                        }}
-                                        onContextMenu={(e) => handleGalleryContextMenu(e, item.id)}
-                                    >
-                                        <div className="aspect-video bg-black mb-1 rounded overflow-hidden relative">
+                                    <div key={item.id} draggable onDragStart={(e) => { e.dataTransfer.setData('type', item.type); e.dataTransfer.setData('src', item.src); e.dataTransfer.setData('name', item.name); if(item.duration) e.dataTransfer.setData('duration', item.duration.toString())}} className="bg-black border border-zinc-800 p-2 rounded cursor-grab hover:border-lime-500 transition-colors group relative">
+                                        <div className="aspect-video bg-[#0f0f11] mb-1 rounded overflow-hidden relative">
                                             <video src={item.src} className="w-full h-full object-cover opacity-60 group-hover:opacity-100" />
                                         </div>
                                         <p className="text-[10px] text-gray-300 truncate">{item.name}</p>
                                     </div>
                                 ))}
-                                {getFilteredLibrary('VIDEO').length === 0 && (
-                                    <div className="col-span-2 text-[10px] text-gray-600 italic text-center py-2">No videos yet</div>
-                                )}
                             </div>
                         )}
-                    </div>
-
-                    {/* Images Section */}
-                    <div>
-                        <button 
-                            className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-2"
-                            onClick={() => setIsImagesOpen(!isImagesOpen)}
-                        >
+                        </div>
+                        {/* Images */}
+                         <div>
+                        <button className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-2" onClick={() => setIsImagesOpen(!isImagesOpen)}>
                             <span className="flex items-center gap-2"><Icons.Image size={10} /> Images</span>
                             <span className="text-gray-600">{isImagesOpen ? '▼' : '▶'}</span>
                         </button>
-                        
                         {isImagesOpen && (
-                            <div className="grid grid-cols-2 gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                            <div className="grid grid-cols-2 gap-2">
                                 {getFilteredLibrary('IMAGE').map(item => (
-                                    <div 
-                                        key={item.id}
-                                        className="bg-[#27272a] p-2 rounded cursor-grab hover:bg-[#3f3f46] transition-colors group relative"
-                                        draggable
-                                        onDragStart={(e) => {
-                                            e.dataTransfer.setData('type', item.type);
-                                            e.dataTransfer.setData('src', item.src);
-                                            e.dataTransfer.setData('name', item.name);
-                                            if (item.duration) e.dataTransfer.setData('duration', item.duration.toString());
-                                        }}
-                                        onContextMenu={(e) => handleGalleryContextMenu(e, item.id)}
-                                    >
-                                        <div className="aspect-video bg-black mb-1 rounded overflow-hidden relative">
+                                    <div key={item.id} draggable onDragStart={(e) => { e.dataTransfer.setData('type', item.type); e.dataTransfer.setData('src', item.src); e.dataTransfer.setData('name', item.name); if(item.duration) e.dataTransfer.setData('duration', item.duration.toString())}} className="bg-black border border-zinc-800 p-2 rounded cursor-grab hover:border-lime-500 transition-colors group relative">
+                                        <div className="aspect-video bg-[#0f0f11] mb-1 rounded overflow-hidden relative">
                                             <img src={item.src} className="w-full h-full object-cover opacity-80 group-hover:opacity-100" />
                                         </div>
                                         <p className="text-[10px] text-gray-300 truncate">{item.name}</p>
                                     </div>
                                 ))}
-                                {getFilteredLibrary('IMAGE').length === 0 && (
-                                    <div className="col-span-2 text-[10px] text-gray-600 italic text-center py-2">No images yet</div>
-                                )}
                             </div>
                         )}
-                    </div>
-
-                    {/* Audio Section */}
-                    <div>
-                        <button 
-                            className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-2"
-                            onClick={() => setIsAudioOpen(!isAudioOpen)}
-                        >
+                        </div>
+                         {/* Audio */}
+                          <div>
+                        <button className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-2" onClick={() => setIsAudioOpen(!isAudioOpen)}>
                             <span className="flex items-center gap-2"><Icons.Music size={10} /> Audio</span>
                             <span className="text-gray-600">{isAudioOpen ? '▼' : '▶'}</span>
                         </button>
-
                         {isAudioOpen && (
-                            <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                             <div className="space-y-2">
                                 {getFilteredLibrary('AUDIO').map(item => (
-                                    <div 
-                                        key={item.id}
-                                        className="bg-[#27272a] p-2 rounded cursor-grab hover:bg-[#3f3f46] transition-colors flex items-center gap-3 relative"
-                                        draggable
-                                        onDragStart={(e) => {
-                                            e.dataTransfer.setData('type', item.type);
-                                            e.dataTransfer.setData('src', item.src);
-                                            e.dataTransfer.setData('name', item.name);
-                                            if (item.duration) e.dataTransfer.setData('duration', item.duration.toString());
-                                        }}
-                                        onContextMenu={(e) => handleGalleryContextMenu(e, item.id)}
-                                    >
-                                        <div className="w-8 h-8 bg-lime-900/50 rounded flex items-center justify-center shrink-0">
-                                            <Icons.Music size={14} className="text-lime-500" />
-                                        </div>
+                                    <div key={item.id} draggable onDragStart={(e) => { e.dataTransfer.setData('type', item.type); e.dataTransfer.setData('src', item.src); e.dataTransfer.setData('name', item.name); if(item.duration) e.dataTransfer.setData('duration', item.duration.toString())}} className="bg-black border border-zinc-800 p-2 rounded cursor-grab hover:border-lime-500 transition-colors flex items-center gap-3 relative">
+                                        <div className="w-8 h-8 bg-lime-900/20 rounded flex items-center justify-center shrink-0"><Icons.Music size={14} className="text-lime-500" /></div>
                                         <p className="text-xs text-gray-300 truncate flex-1">{item.name}</p>
                                     </div>
                                 ))}
-                                {getFilteredLibrary('AUDIO').length === 0 && (
-                                    <div className="text-[10px] text-gray-600 italic text-center py-2">No audio tracks yet</div>
-                                )}
                             </div>
                         )}
-                    </div>
-
-                </div>
-            </div>
+                        </div>
+                  </div>
+             </div>
         )}
-
+        
         {activeTab === 'overlays' && (
-            <div className="space-y-6">
+             <div className="space-y-6">
+                 <input 
+                    type="file" 
+                    ref={overlayInputRef} 
+                    className="hidden" 
+                    accept="image/*"
+                    multiple
+                    onChange={(e) => handleFileUpload(e, 'OVERLAY')}
+                 />
                  <div 
                     className="border-2 border-dashed border-lime-500/30 bg-lime-900/10 rounded-xl p-4 text-center hover:border-lime-500/80 hover:bg-lime-500/10 transition-colors cursor-pointer"
+                    onClick={() => overlayInputRef.current?.click()}
                     onDragOver={(e) => { e.preventDefault(); }}
                     onDrop={(e) => handleFileUpload(e, 'OVERLAY')}
                 >
                     <Icons.Plus className="w-6 h-6 text-lime-400 mx-auto mb-2" />
-                    <p className="text-xs text-lime-200">Drag Stickers/PNGs Here</p>
+                    <p className="text-xs text-lime-200">Drag or Click to Add PNGs</p>
+                    <p className="text-[9px] text-lime-200/50 mt-1">(Supports Paste from Clipboard)</p>
                 </div>
 
                 <div>
@@ -829,7 +831,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                          {DEFAULT_EMOJIS.map((emoji, idx) => (
                              <button 
                                 key={idx}
-                                className="aspect-square bg-[#27272a] hover:bg-[#3f3f46] rounded flex items-center justify-center text-2xl transition-colors"
+                                className="aspect-square bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded flex items-center justify-center text-2xl transition-colors"
                                 onClick={() => {
                                     const newEl = {
                                         id: Math.random().toString(),
@@ -840,9 +842,10 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                         duration: 3,
                                         trackId: 0,
                                         volume: 0, opacity: 1, rotation: 0, scale: 1, trimStart: 0,
-                                        fontSize: 100, // Large for sticker effect
+                                        fontSize: 100,
                                         fadeIn: 0, fadeOut: 0,
-                                        playbackRate: 1
+                                        playbackRate: 1,
+                                        x: 0, y: 0
                                     };
                                     dispatch({ type: 'ADD_ELEMENT', payload: newEl });
                                 }}
@@ -851,33 +854,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                              </button>
                          ))}
                      </div>
-                </div>
-
-                <div>
-                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 mt-6">My Overlays</h3>
-                    <div className="grid grid-cols-3 gap-2">
-                        {getFilteredLibrary('OVERLAY').map(item => (
-                            <div 
-                                key={item.id}
-                                className="bg-[#27272a] p-1 rounded cursor-grab hover:bg-[#3f3f46] transition-colors group relative"
-                                draggable
-                                onDragStart={(e) => {
-                                    e.dataTransfer.setData('type', item.type);
-                                    e.dataTransfer.setData('src', item.src);
-                                    e.dataTransfer.setData('name', item.name);
-                                    if (item.duration) e.dataTransfer.setData('duration', item.duration.toString());
-                                }}
-                                onContextMenu={(e) => handleGalleryContextMenu(e, item.id)}
-                            >
-                                <div className="aspect-square bg-black/50 rounded overflow-hidden relative">
-                                    <img src={item.src} className="w-full h-full object-contain" />
-                                </div>
-                            </div>
-                        ))}
-                         {getFilteredLibrary('OVERLAY').length === 0 && (
-                                <div className="col-span-3 text-[10px] text-gray-600 italic text-center py-2">No overlays added</div>
-                        )}
-                    </div>
                 </div>
             </div>
         )}
@@ -896,9 +872,31 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                             </div>
                         )}
                         <div className="space-y-4">
-                            <h3 className="text-sm font-semibold text-white border-b border-white/10 pb-2 truncate">
+                            <h3 className="text-sm font-semibold text-white border-b border-zinc-800 pb-2 truncate">
                                 {isMultiSelect ? 'Multiple Selection' : selectedElement.name}
                             </h3>
+
+                            {/* Position Controls */}
+                            <div className="grid grid-cols-2 gap-2">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-gray-400 uppercase">Pos X</label>
+                                    <input 
+                                        type="number" step="10"
+                                        value={selectedElement.x || 0} 
+                                        onChange={(e) => updateProperty('x', parseFloat(e.target.value))}
+                                        className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-white"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-gray-400 uppercase">Pos Y</label>
+                                    <input 
+                                        type="number" step="10"
+                                        value={selectedElement.y || 0} 
+                                        onChange={(e) => updateProperty('y', parseFloat(e.target.value))}
+                                        className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-white"
+                                    />
+                                </div>
+                            </div>
                             
                             <div className="space-y-1">
                                 <label className="text-[10px] text-gray-400 uppercase">Opacity</label>
@@ -906,7 +904,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                     type="range" min="0" max="1" step="0.1" 
                                     value={selectedElement.opacity} 
                                     onChange={(e) => updateProperty('opacity', parseFloat(e.target.value))}
-                                    className="w-full accent-lime-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                    className="w-full accent-lime-500 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                                 />
                             </div>
 
@@ -916,7 +914,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                     type="range" min="0.1" max="3" step="0.1" 
                                     value={selectedElement.scale} 
                                     onChange={(e) => updateProperty('scale', parseFloat(e.target.value))}
-                                    className="w-full accent-lime-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                    className="w-full accent-lime-500 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                                 />
                             </div>
 
@@ -926,12 +924,12 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                     type="range" min="-180" max="180" step="1" 
                                     value={selectedElement.rotation} 
                                     onChange={(e) => updateProperty('rotation', parseFloat(e.target.value))}
-                                    className="w-full accent-lime-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                    className="w-full accent-lime-500 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                                 />
                             </div>
 
                             {selectedElement.type === ElementType.TEXT && (
-                                <div className="space-y-1 pt-2 border-t border-white/10">
+                                <div className="space-y-1 pt-2 border-t border-zinc-800">
                                     <label className="text-[10px] text-gray-400 uppercase flex items-center gap-2">
                                         <Icons.Type size={12} /> Font Size
                                     </label>
@@ -939,14 +937,14 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                         type="range" min="10" max="200" step="1" 
                                         value={selectedElement.fontSize || 40} 
                                         onChange={(e) => updateProperty('fontSize', parseFloat(e.target.value))}
-                                        className="w-full accent-lime-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                        className="w-full accent-lime-500 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                                     />
                                     <div className="text-right text-[10px] text-gray-400">{selectedElement.fontSize || 40}px</div>
                                 </div>
                             )}
 
                             {(selectedElement.type === ElementType.VIDEO || selectedElement.type === ElementType.AUDIO) && (
-                                <div className="space-y-3 pt-2 border-t border-white/10">
+                                <div className="space-y-3 pt-2 border-t border-zinc-800">
                                     <div className="space-y-1">
                                         <label className="text-[10px] text-gray-400 uppercase flex items-center gap-2">
                                             <Icons.Volume size={12} /> Volume
@@ -955,7 +953,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                             type="range" min="0" max="1" step="0.1" 
                                             value={selectedElement.volume} 
                                             onChange={(e) => updateProperty('volume', parseFloat(e.target.value))}
-                                            className="w-full accent-lime-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                            className="w-full accent-lime-500 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                                         />
                                     </div>
 
@@ -968,7 +966,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                                 type="range" min="0.25" max="4" step="0.25" 
                                                 value={selectedElement.playbackRate || 1} 
                                                 onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
-                                                className="flex-1 accent-lime-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                                className="flex-1 accent-lime-500 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                                             />
                                             <span className="text-[10px] text-white w-8">{selectedElement.playbackRate || 1}x</span>
                                         </div>
@@ -981,7 +979,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                                 type="number" min="0" max="10" step="0.5" 
                                                 value={selectedElement.fadeIn || 0} 
                                                 onChange={(e) => updateProperty('fadeIn', parseFloat(e.target.value))}
-                                                className="w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-white"
+                                                className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-white"
                                             />
                                         </div>
                                         <div className="space-y-1">
@@ -990,7 +988,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                                 type="number" min="0" max="10" step="0.5" 
                                                 value={selectedElement.fadeOut || 0} 
                                                 onChange={(e) => updateProperty('fadeOut', parseFloat(e.target.value))}
-                                                className="w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-white"
+                                                className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-white"
                                             />
                                         </div>
                                     </div>
@@ -1000,7 +998,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                              {selectedElement.type === ElementType.VIDEO && (
                                 <div className="pt-4">
                                     <button 
-                                        className="w-full py-2 bg-[#27272a] hover:bg-[#3f3f46] text-xs text-white rounded border border-white/10 flex items-center justify-center gap-2"
+                                        className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 text-xs text-white rounded border border-zinc-800 flex items-center justify-center gap-2"
                                         onClick={() => {
                                             dispatch({ type: 'EXTRACT_AUDIO', payload: null });
                                         }}
@@ -1017,17 +1015,17 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
       </div>
 
-      <div className="p-4 border-t border-lime-900/30 bg-[#121214] space-y-2 shrink-0">
+      <div className="p-4 border-t border-zinc-800 bg-black space-y-2 shrink-0">
           <div className="flex gap-2 mb-2">
             <button 
                 onClick={() => dispatch({ type: 'SET_CANVAS_MODE', payload: 'landscape'})}
-                className={`flex-1 flex items-center justify-center p-2 rounded ${state.canvasMode === 'landscape' ? 'bg-lime-700' : 'bg-[#27272a] text-gray-400'}`}
+                className={`flex-1 flex items-center justify-center p-2 rounded ${state.canvasMode === 'landscape' ? 'bg-lime-900 text-lime-400' : 'bg-zinc-900 text-gray-400'}`}
             >
                 <Icons.Landscape size={14} />
             </button>
             <button 
                 onClick={() => dispatch({ type: 'SET_CANVAS_MODE', payload: 'portrait'})}
-                className={`flex-1 flex items-center justify-center p-2 rounded ${state.canvasMode === 'portrait' ? 'bg-lime-700' : 'bg-[#27272a] text-gray-400'}`}
+                className={`flex-1 flex items-center justify-center p-2 rounded ${state.canvasMode === 'portrait' ? 'bg-lime-900 text-lime-400' : 'bg-zinc-900 text-gray-400'}`}
             >
                 <Icons.Portrait size={14} />
             </button>
@@ -1043,7 +1041,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
       {galleryContextMenu.id && (
           <div 
-             className="fixed z-[100] bg-[#27272a] border border-white/10 shadow-xl rounded py-1 w-32"
+             className="fixed z-[100] bg-black border border-zinc-800 shadow-xl rounded py-1 w-32"
              style={{ top: galleryContextMenu.y, left: galleryContextMenu.x }}
           >
               <button 
@@ -1064,9 +1062,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
       {isExporting && (
           <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center">
-              <div className="bg-[#18181b] p-6 rounded-xl border border-white/10 w-80 text-center">
+              <div className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 w-80 text-center">
                   <h3 className="text-white font-bold mb-2">Rendering Video...</h3>
-                  <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden mb-2">
+                  <div className="w-full h-2 bg-black rounded-full overflow-hidden mb-2">
                       <div className="h-full bg-lime-500 transition-all duration-300" style={{ width: `${exportProgress}%` }}></div>
                   </div>
                   <p className="text-xs text-gray-400">{exportProgress}% Complete</p>

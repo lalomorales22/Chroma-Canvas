@@ -333,119 +333,128 @@ const App: React.FC = () => {
     }
   };
 
-  if (state.view === 'RECORDER') {
-      return (
-          <RecorderStudio 
-              onBack={() => dispatch({ type: 'SET_VIEW', payload: 'EDITOR' })}
-              onSave={(items) => {
-                  dispatch({ type: 'ADD_LIBRARY_ITEMS', payload: items });
-                  dispatch({ type: 'SET_VIEW', payload: 'EDITOR' });
-              }}
-          />
-      );
-  }
-
   return (
     <div 
-        className="flex h-screen w-screen bg-[#0f0f11] text-stone-200 overflow-hidden" 
+        className="h-screen w-screen bg-black flex items-center justify-center p-6 text-stone-200 overflow-hidden" 
         onClick={closeContextMenu}
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleAppDrop}
     >
-      <div className="flex-1 flex flex-col relative min-w-0">
-        <div className="h-14 bg-[#18181b] border-b border-lime-900/30 flex items-center px-4 justify-between z-20 shrink-0">
-            <div className="flex items-center gap-6">
-                <div className="flex items-center gap-2 cursor-pointer" onClick={() => dispatch({ type: 'SET_VIEW', payload: 'EDITOR' })}>
-                    <div className="w-8 h-8 bg-lime-800 rounded-lg flex items-center justify-center">
-                        <Icons.Layers size={18} className="text-white" />
-                    </div>
-                    <h1 className="font-bold text-lg tracking-tight text-white">Chroma<span className="text-lime-500">Canvas</span></h1>
-                </div>
-
-                <div className="h-6 w-[1px] bg-white/10"></div>
-
-                <button 
-                    onClick={() => dispatch({ type: 'SET_VIEW', payload: 'RECORDER' })}
-                    className="flex items-center gap-2 group"
-                >
-                    <div className="flex items-center gap-2 px-3 py-1.5 bg-transparent group-hover:bg-[#27272a] rounded-lg transition-colors">
-                        <Icons.Layout size={18} className="text-lime-500" />
-                        <span className="font-bold text-lg tracking-tight text-white">Studio</span>
-                    </div>
-                </button>
-            </div>
+        {/* Widget Container */}
+        <div className="w-full h-full max-w-[1920px] bg-black rounded-3xl border border-zinc-800 shadow-2xl overflow-hidden flex flex-col relative">
             
-            <div className="flex items-center gap-4">
-                <div className="flex items-center gap-4 bg-[#27272a] rounded-full px-3 py-1.5 border border-white/5">
-                    <button onClick={() => dispatch({ type: 'SET_ZOOM', payload: state.zoom - 10 })}><Icons.ZoomOut size={16} className="text-gray-400 hover:text-white" /></button>
-                    <span className="text-xs font-mono text-gray-400 w-12 text-center">{Math.round(state.zoom)}%</span>
-                    <button onClick={() => dispatch({ type: 'SET_ZOOM', payload: state.zoom + 10 })}><Icons.ZoomIn size={16} className="text-gray-400 hover:text-white" /></button>
-                </div>
-            </div>
-        </div>
-
-        <Timeline state={state} dispatch={dispatch} onContextMenu={handleContextMenu} />
-      </div>
-
-      <RightSidebar state={state} dispatch={dispatch} width={sidebarWidth} setWidth={setSidebarWidth} />
-
-      {contextMenu.visible && (
-        <div 
-            className="fixed z-[100] bg-[#27272a] border border-lime-500/30 rounded-lg shadow-2xl py-1 w-48 text-sm animate-in fade-in zoom-in-95 duration-100"
-            style={{ top: contextMenu.y, left: contextMenu.x }}
-        >
-            {contextMenu.targetId ? (
-                <>
-                    <div className="px-4 py-1 text-[10px] text-gray-500 font-bold uppercase">
-                        {state.selectedIds.length > 1 ? `${state.selectedIds.length} Items Selected` : 'Actions'}
-                    </div>
-                    <button className="w-full text-left px-4 py-2 hover:bg-lime-900/50 flex items-center gap-2" onClick={() => dispatch({ type: 'COPY_ELEMENT', payload: contextMenu.targetId })}>
-                        <Icons.Copy size={14} /> Copy
-                    </button>
-                    <button className="w-full text-left px-4 py-2 hover:bg-lime-900/50 flex items-center gap-2" onClick={() => dispatch({ type: 'SPLIT_CLIP', payload: contextMenu.targetId })}>
-                        <Icons.Scissors size={14} /> Split Clip
-                    </button>
-                    <button className="w-full text-left px-4 py-2 hover:bg-lime-900/50 flex items-center gap-2" onClick={() => dispatch({ type: 'EXTRACT_AUDIO', payload: null })}>
-                        <Icons.Music size={14} /> Extract Audio (All)
-                    </button>
-                    <div className="h-[1px] bg-white/10 my-1" />
-                    <button className="w-full text-left px-4 py-2 hover:bg-red-900/50 text-red-400 flex items-center gap-2" onClick={() => dispatch({ type: 'DELETE_SELECTED' })}>
-                        <Icons.Trash size={14} /> Delete Selected
-                    </button>
-                </>
+            {state.view === 'RECORDER' ? (
+                <RecorderStudio 
+                    onBack={() => dispatch({ type: 'SET_VIEW', payload: 'EDITOR' })}
+                    onSave={(items) => {
+                        dispatch({ type: 'ADD_LIBRARY_ITEMS', payload: items });
+                        dispatch({ type: 'SET_VIEW', payload: 'EDITOR' });
+                    }}
+                />
             ) : (
                 <>
-                   <div className="px-4 py-1 text-xs text-gray-500 font-bold uppercase tracking-wider">Add to Canvas</div>
-                   {state.clipboard && (
-                        <button className="w-full text-left px-4 py-2 hover:bg-lime-900/50 flex items-center gap-2" onClick={() => dispatch({ type: 'PASTE_ELEMENT' })}>
-                            <Icons.Clipboard size={14} /> Paste
-                        </button>
-                   )}
-                   <button 
-                        className="w-full text-left px-4 py-2 hover:bg-lime-900/50 flex items-center gap-2"
-                        onClick={() => {
-                            const newEl = {
-                                id: Math.random().toString(),
-                                type: ElementType.TEXT,
-                                name: "Text Overlay",
-                                text: "Double Click to Edit",
-                                startTime: state.currentTime, 
-                                duration: 3,
-                                trackId: 0,
-                                volume: 0, opacity: 1, rotation: 0, scale: 1, trimStart: 0,
-                                fontSize: DEFAULT_FONT_SIZE,
-                                fadeIn: 0, fadeOut: 0,
-                                playbackRate: 1
-                            };
-                            dispatch({ type: 'ADD_ELEMENT', payload: newEl });
-                        }}
-                   >
-                        <Icons.Type size={14} /> Add Text
-                    </button>
+                    {/* Editor Header */}
+                    <div className="h-14 bg-black border-b border-zinc-800 flex items-center px-6 justify-between z-20 shrink-0">
+                        <div className="flex items-center gap-6">
+                            <div className="flex items-center gap-2 cursor-pointer" onClick={() => dispatch({ type: 'SET_VIEW', payload: 'EDITOR' })}>
+                                <div className="w-8 h-8 bg-lime-800 rounded-lg flex items-center justify-center">
+                                    <Icons.Layers size={18} className="text-white" />
+                                </div>
+                                <h1 className="font-bold text-lg tracking-tight text-white">Chroma<span className="text-lime-500">Canvas</span></h1>
+                            </div>
+
+                            <div className="h-6 w-[1px] bg-zinc-800"></div>
+
+                            <button 
+                                onClick={() => dispatch({ type: 'SET_VIEW', payload: 'RECORDER' })}
+                                className="flex items-center gap-2 group"
+                            >
+                                <div className="flex items-center gap-2 px-3 py-1.5 bg-transparent group-hover:bg-zinc-900 rounded-lg transition-colors">
+                                    <Icons.Layout size={18} className="text-lime-500" />
+                                    <span className="font-bold text-lg tracking-tight text-white">Studio</span>
+                                </div>
+                            </button>
+                        </div>
+                        
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-4 bg-zinc-900 rounded-full px-3 py-1.5 border border-zinc-800">
+                                <button onClick={() => dispatch({ type: 'SET_ZOOM', payload: state.zoom - 10 })}><Icons.ZoomOut size={16} className="text-gray-400 hover:text-white" /></button>
+                                <span className="text-xs font-mono text-gray-400 w-12 text-center">{Math.round(state.zoom)}%</span>
+                                <button onClick={() => dispatch({ type: 'SET_ZOOM', payload: state.zoom + 10 })}><Icons.ZoomIn size={16} className="text-gray-400 hover:text-white" /></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Editor Content */}
+                    <div className="flex-1 flex overflow-hidden">
+                        <div className="flex-1 flex flex-col relative min-w-0">
+                            <Timeline state={state} dispatch={dispatch} onContextMenu={handleContextMenu} />
+                        </div>
+                        <RightSidebar state={state} dispatch={dispatch} width={sidebarWidth} setWidth={setSidebarWidth} />
+                    </div>
                 </>
             )}
+
+            {/* Context Menu (Global) */}
+            {contextMenu.visible && (
+                <div 
+                    className="fixed z-[100] bg-black border border-zinc-800 rounded-lg shadow-2xl py-1 w-48 text-sm animate-in fade-in zoom-in-95 duration-100"
+                    style={{ top: contextMenu.y, left: contextMenu.x }}
+                >
+                    {contextMenu.targetId ? (
+                        <>
+                            <div className="px-4 py-1 text-[10px] text-gray-500 font-bold uppercase">
+                                {state.selectedIds.length > 1 ? `${state.selectedIds.length} Items Selected` : 'Actions'}
+                            </div>
+                            <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => dispatch({ type: 'COPY_ELEMENT', payload: contextMenu.targetId })}>
+                                <Icons.Copy size={14} /> Copy
+                            </button>
+                            <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => dispatch({ type: 'SPLIT_CLIP', payload: contextMenu.targetId })}>
+                                <Icons.Scissors size={14} /> Split Clip
+                            </button>
+                            <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => dispatch({ type: 'EXTRACT_AUDIO', payload: null })}>
+                                <Icons.Music size={14} /> Extract Audio (All)
+                            </button>
+                            <div className="h-[1px] bg-zinc-800 my-1" />
+                            <button className="w-full text-left px-4 py-2 hover:bg-red-900/20 text-red-500 flex items-center gap-2" onClick={() => dispatch({ type: 'DELETE_SELECTED' })}>
+                                <Icons.Trash size={14} /> Delete Selected
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                        <div className="px-4 py-1 text-xs text-gray-500 font-bold uppercase tracking-wider">Add to Canvas</div>
+                        {state.clipboard && (
+                                <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => dispatch({ type: 'PASTE_ELEMENT' })}>
+                                    <Icons.Clipboard size={14} /> Paste
+                                </button>
+                        )}
+                        <button 
+                                className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2"
+                                onClick={() => {
+                                    const newEl = {
+                                        id: Math.random().toString(),
+                                        type: ElementType.TEXT,
+                                        name: "Text Overlay",
+                                        text: "Double Click to Edit",
+                                        startTime: state.currentTime, 
+                                        duration: 3,
+                                        trackId: 0,
+                                        volume: 0, opacity: 1, rotation: 0, scale: 1, trimStart: 0,
+                                        fontSize: DEFAULT_FONT_SIZE,
+                                        fadeIn: 0, fadeOut: 0,
+                                        playbackRate: 1
+                                    };
+                                    dispatch({ type: 'ADD_ELEMENT', payload: newEl });
+                                }}
+                        >
+                                <Icons.Type size={14} /> Add Text
+                            </button>
+                        </>
+                    )}
+                </div>
+            )}
+
         </div>
-      )}
     </div>
   );
 };

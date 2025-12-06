@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Icons } from './Icon';
 import { ElementType, LibraryItem } from '../types';
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 interface RecorderStudioProps {
   onBack: () => void;
@@ -10,7 +12,7 @@ interface RecorderStudioProps {
 
 interface ActiveStream {
     id: string;
-    type: 'SCREEN' | 'CAMERA' | 'AUDIO' | 'WHITEBOARD';
+    type: 'SCREEN' | 'CAMERA' | 'AUDIO' | 'WHITEBOARD' | 'KEYBOARD' | 'GLB_GALLERY';
     stream: MediaStream;
     originalStream?: MediaStream; // Store original for chroma key toggle
     name: string;
@@ -20,8 +22,14 @@ interface ActiveStream {
     height: number;
     deviceId?: string;
     chromaKey?: boolean;
-    isDraggable?: boolean; // New: For whiteboard mode
+    isDraggable?: boolean; // New: For whiteboard/piano mode
     muted?: boolean;
+}
+
+interface ThreeDConfig {
+    models: { url: string, name: string }[];
+    rotationSpeed: number; // 0.01 default
+    slideDuration: number; // 10s default
 }
 
 // Green Screen Processing Helper
@@ -112,7 +120,15 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
         streamId: string | null;
         type: 'ITEM' | 'CANVAS';
     } | null>(null);
+
+    // Piano Settings
+    const [showPianoSettings, setShowPianoSettings] = useState<string | null>(null); // Stream ID
+    const [soundMap, setSoundMap] = useState<Record<string, { buffer: AudioBuffer, name: string }>>({});
     
+    // 3D Settings
+    const [showThreeDSettings, setShowThreeDSettings] = useState<string | null>(null); // Stream ID
+    const [threeDState, setThreeDState] = useState<Record<string, ThreeDConfig>>({});
+
     // Chroma Key Processors ref
     const chromaProcessors = useRef<Map<string, { stop: () => void }>>(new Map());
 
@@ -158,7 +174,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                     return {
                         ...s,
                         width: Math.max(100, resizeState.startWidth + deltaX),
-                        height: Math.max(100, resizeState.startHeight + deltaY)
+                        height: Math.max(50, resizeState.startHeight + deltaY)
                     };
                 }
                 return s;
@@ -283,7 +299,6 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
 
     const addWhiteboard = (x: number, y: number) => {
         const id = Math.random().toString(36).substr(2, 9);
-        // Stream is initially empty, populated by WhiteboardWindow
         setStreams(prev => [...prev, {
             id,
             type: 'WHITEBOARD',
@@ -294,6 +309,35 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
             height: 400,
             isDraggable: true
         }]);
+    };
+
+    const addPiano = (x: number, y: number) => {
+        const id = Math.random().toString(36).substr(2, 9);
+        setStreams(prev => [...prev, {
+            id,
+            type: 'KEYBOARD',
+            stream: new MediaStream(), // Placeholder
+            name: 'Synthesizer',
+            x, y,
+            width: 500,
+            height: 250,
+            isDraggable: true
+        }]);
+    };
+
+    const add3DViewer = (x: number, y: number) => {
+        const id = Math.random().toString(36).substr(2, 9);
+        setStreams(prev => [...prev, {
+            id,
+            type: 'GLB_GALLERY',
+            stream: new MediaStream(), // Placeholder
+            name: '3D Gallery',
+            x, y,
+            width: 400,
+            height: 400,
+            isDraggable: true
+        }]);
+        setThreeDState(prev => ({ ...prev, [id]: { models: [], rotationSpeed: 0.01, slideDuration: 10 } }));
     };
 
     const updateWhiteboardStream = (id: string, stream: MediaStream) => {
@@ -398,6 +442,11 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
             }
             return prev.filter(s => s.id !== id);
         });
+        setThreeDState(prev => {
+            const newState = { ...prev };
+            delete newState[id];
+            return newState;
+        });
         setContextMenu(null);
     };
 
@@ -428,11 +477,15 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
         recordedChunksRef.current.clear();
 
         streams.forEach(s => {
-            const mimeType = s.type === 'AUDIO' ? 'audio/webm' : 'video/webm;codecs=vp9';
-            const options = MediaRecorder.isTypeSupported(mimeType) ? { mimeType } : undefined;
+            // Prefer video/webm;codecs=vp9 for video, audio/webm for audio only
+            // For streams like Piano/Whiteboard that are generated canvas streams, we check support
+            let mimeType = s.type === 'AUDIO' ? 'audio/webm' : 'video/webm;codecs=vp9';
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                 mimeType = s.type === 'AUDIO' ? 'audio/webm' : 'video/webm';
+            }
             
             try {
-                const recorder = new MediaRecorder(s.stream, options);
+                const recorder = new MediaRecorder(s.stream, { mimeType });
                 recordedChunksRef.current.set(s.id, []);
 
                 recorder.ondataavailable = (e) => {
@@ -446,7 +499,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                 recorder.start(1000); 
                 mediaRecordersRef.current.set(s.id, recorder);
             } catch (e) {
-                console.error(`Failed to record stream ${s.id}`, e);
+                console.error(`Failed to record stream ${s.id} (${s.name})`, e);
             }
         });
 
@@ -558,8 +611,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
         };
 
         // Start Recording the Master Stream
-        // Note: For streaming we want smaller chunks more often
-        const mimeType = 'video/webm;codecs=vp9'; // Chrome standard
+        const mimeType = 'video/webm;codecs=vp9'; 
         const options = MediaRecorder.isTypeSupported(mimeType) ? { mimeType } : undefined;
         
         try {
@@ -662,6 +714,8 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
         if (type === 'CAMERA') addCamera(x, y);
         if (type === 'MIC') addMicrophone(x, y);
         if (type === 'WHITEBOARD') addWhiteboard(x, y);
+        if (type === 'KEYBOARD') addPiano(x, y);
+        if (type === 'GLB_GALLERY') add3DViewer(x, y);
     };
 
     const handleDragStart = (e: React.DragEvent, id: string) => {
@@ -717,14 +771,14 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
     };
 
     return (
-        <div className="absolute inset-0 bg-[#0f0f11] flex flex-col z-50 animate-in fade-in duration-300">
+        <div className="absolute inset-0 bg-black flex flex-col z-50 animate-in fade-in duration-300">
             {/* Header */}
-            <div className="h-16 border-b border-lime-900/30 flex items-center justify-between px-6 bg-[#18181b]">
+            <div className="h-16 border-b border-zinc-800 flex items-center justify-between px-6 bg-black">
                 <div className="flex items-center gap-4">
                     <button onClick={onBack} disabled={isRecording || isStreaming} className="p-2 hover:bg-white/10 rounded-full disabled:opacity-50">
                         <Icons.Back className="text-white" />
                     </button>
-                    <h1 className="text-xl font-bold flex items-center gap-2">
+                    <h1 className="text-xl font-bold flex items-center gap-2 text-white">
                         <Icons.Layout className="text-lime-500" />
                         Studio
                     </h1>
@@ -744,7 +798,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                         <>
                             <button 
                                 onClick={() => setShowStreamSettings(true)}
-                                className="flex items-center gap-2 bg-[#27272a] hover:bg-[#3f3f46] text-lime-400 px-4 py-2 rounded-full font-bold transition-all border border-lime-500/30"
+                                className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 text-lime-400 px-4 py-2 rounded-full font-bold transition-all border border-zinc-800"
                             >
                                 <Icons.Signal size={16} />
                                 Stream
@@ -774,14 +828,14 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
 
             <div className="flex-1 flex overflow-hidden">
                 {/* Source Palette Sidebar */}
-                <div className="w-64 bg-[#18181b] border-r border-lime-900/30 p-4 flex flex-col gap-6">
+                <div className="w-64 bg-black border-r border-zinc-800 p-4 flex flex-col gap-6 overflow-y-auto custom-scrollbar">
                     <div>
                         <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Add Sources</h3>
                         <div className="space-y-3">
                             <div 
                                 draggable 
                                 onDragStart={(e) => e.dataTransfer.setData('sourceType', 'SCREEN')}
-                                className="bg-[#27272a] p-4 rounded-xl cursor-grab hover:bg-[#3f3f46] border border-white/5 hover:border-lime-500 transition-all group"
+                                className="bg-black p-4 rounded-xl cursor-grab hover:bg-zinc-900 border border-zinc-800 hover:border-lime-500 transition-all group"
                             >
                                 <div className="flex items-center gap-3 mb-2 text-lime-400 group-hover:text-lime-300">
                                     <Icons.Monitor />
@@ -793,7 +847,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             <div 
                                 draggable 
                                 onDragStart={(e) => e.dataTransfer.setData('sourceType', 'CAMERA')}
-                                className="bg-[#27272a] p-4 rounded-xl cursor-grab hover:bg-[#3f3f46] border border-white/5 hover:border-lime-500 transition-all group"
+                                className="bg-black p-4 rounded-xl cursor-grab hover:bg-zinc-900 border border-zinc-800 hover:border-lime-500 transition-all group"
                             >
                                 <div className="flex items-center gap-3 mb-2 text-lime-400 group-hover:text-lime-300">
                                     <Icons.Video />
@@ -805,7 +859,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             <div 
                                 draggable 
                                 onDragStart={(e) => e.dataTransfer.setData('sourceType', 'MIC')}
-                                className="bg-[#27272a] p-4 rounded-xl cursor-grab hover:bg-[#3f3f46] border border-white/5 hover:border-lime-500 transition-all group"
+                                className="bg-black p-4 rounded-xl cursor-grab hover:bg-zinc-900 border border-zinc-800 hover:border-lime-500 transition-all group"
                             >
                                 <div className="flex items-center gap-3 mb-2 text-lime-400 group-hover:text-lime-300">
                                     <Icons.Mic />
@@ -817,13 +871,37 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             <div 
                                 draggable 
                                 onDragStart={(e) => e.dataTransfer.setData('sourceType', 'WHITEBOARD')}
-                                className="bg-[#27272a] p-4 rounded-xl cursor-grab hover:bg-[#3f3f46] border border-white/5 hover:border-lime-500 transition-all group"
+                                className="bg-black p-4 rounded-xl cursor-grab hover:bg-zinc-900 border border-zinc-800 hover:border-lime-500 transition-all group"
                             >
                                 <div className="flex items-center gap-3 mb-2 text-lime-400 group-hover:text-lime-300">
                                     <Icons.Brush />
                                     <span className="font-bold text-sm">Whiteboard</span>
                                 </div>
                                 <p className="text-[10px] text-gray-400">Draw and sketch ideas live.</p>
+                            </div>
+
+                            <div 
+                                draggable 
+                                onDragStart={(e) => e.dataTransfer.setData('sourceType', 'KEYBOARD')}
+                                className="bg-black p-4 rounded-xl cursor-grab hover:bg-zinc-900 border border-zinc-800 hover:border-lime-500 transition-all group"
+                            >
+                                <div className="flex items-center gap-3 mb-2 text-lime-400 group-hover:text-lime-300">
+                                    <Icons.Keyboard />
+                                    <span className="font-bold text-sm">Synthesizer</span>
+                                </div>
+                                <p className="text-[10px] text-gray-400">Playable piano.</p>
+                            </div>
+
+                            <div 
+                                draggable 
+                                onDragStart={(e) => e.dataTransfer.setData('sourceType', 'GLB_GALLERY')}
+                                className="bg-black p-4 rounded-xl cursor-grab hover:bg-zinc-900 border border-zinc-800 hover:border-lime-500 transition-all group"
+                            >
+                                <div className="flex items-center gap-3 mb-2 text-lime-400 group-hover:text-lime-300">
+                                    <Icons.Box />
+                                    <span className="font-bold text-sm">3D Objects</span>
+                                </div>
+                                <p className="text-[10px] text-gray-400">Import & Showcase GLB/GLTF Models.</p>
                             </div>
                         </div>
                     </div>
@@ -833,7 +911,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                         <select 
                             value={selectedAudioDevice} 
                             onChange={(e) => setSelectedAudioDevice(e.target.value)}
-                            className="w-full bg-black/40 border border-white/10 rounded px-2 py-2 text-xs text-white focus:outline-none focus:border-lime-500"
+                            className="w-full bg-black/40 border border-zinc-800 rounded px-2 py-2 text-xs text-white focus:outline-none focus:border-lime-500"
                         >
                             {audioDevices.map(d => (
                                 <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${d.deviceId.substr(0,4)}`}</option>
@@ -863,7 +941,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                     {streams.map(stream => (
                         <div
                             key={stream.id}
-                            className={`absolute bg-black rounded-lg shadow-2xl border border-white/20 group hover:border-lime-500 transition-colors ${stream.isDraggable === false ? 'cursor-default' : 'cursor-grab'}`}
+                            className={`absolute bg-black rounded-lg shadow-2xl border border-zinc-800 group hover:border-lime-500 transition-colors ${stream.isDraggable === false ? 'cursor-default' : 'cursor-grab'}`}
                             style={{ 
                                 left: stream.x, 
                                 top: stream.y, 
@@ -875,9 +953,15 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             onContextMenu={(e) => handleItemContextMenu(e, stream.id)}
                         >
                             {/* Window Header */}
-                            <div className="absolute top-0 left-0 right-0 h-6 bg-black/60 flex items-center justify-between px-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab">
+                            <div className="absolute top-0 left-0 right-0 h-6 bg-black/80 flex items-center justify-between px-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab border-b border-zinc-800">
                                 <span className="text-[10px] text-white truncate max-w-[150px]">{stream.name}</span>
                                 <div className="flex items-center gap-1">
+                                    {stream.type === 'KEYBOARD' && (
+                                        <button onClick={() => setShowPianoSettings(stream.id)} className="hover:text-lime-500 text-white"><Icons.Settings size={12} /></button>
+                                    )}
+                                    {stream.type === 'GLB_GALLERY' && (
+                                        <button onClick={() => setShowThreeDSettings(stream.id)} className="hover:text-lime-500 text-white"><Icons.Settings size={12} /></button>
+                                    )}
                                     <button 
                                         onClick={(e) => { e.stopPropagation(); removeStream(stream.id); }}
                                         className="hover:text-red-500 text-white"
@@ -890,9 +974,9 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             {/* Content */}
                             <div className="w-full h-full overflow-hidden relative">
                                 {stream.type === 'AUDIO' ? (
-                                    <div className={`w-full h-full flex flex-col items-center justify-center bg-gray-900 ${stream.muted ? 'opacity-50' : ''}`}>
+                                    <div className={`w-full h-full flex flex-col items-center justify-center bg-black ${stream.muted ? 'opacity-50' : ''}`}>
                                         <Icons.Mic className={`w-8 h-8 mb-2 ${stream.muted ? 'text-gray-500' : 'text-lime-500 animate-pulse'}`} />
-                                        <div className="w-1/2 h-1 bg-gray-700 rounded overflow-hidden">
+                                        <div className="w-1/2 h-1 bg-gray-800 rounded overflow-hidden">
                                             <div className={`h-full w-2/3 ${stream.muted ? 'bg-gray-500' : 'bg-lime-500 animate-[pulse_1s_ease-in-out_infinite]'}`} />
                                         </div>
                                         {stream.muted && <span className="text-[10px] text-red-400 mt-2 font-bold uppercase">Muted</span>}
@@ -904,6 +988,19 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                                         height={stream.height} 
                                         onStreamReady={(s) => updateWhiteboardStream(stream.id, s)}
                                         isDraggable={stream.isDraggable !== false}
+                                    />
+                                ) : stream.type === 'KEYBOARD' ? (
+                                    <PianoWindow 
+                                        id={`source-${stream.id}`}
+                                        onStreamReady={(s) => updateWhiteboardStream(stream.id, s)}
+                                        isPlayable={stream.isDraggable === false}
+                                        soundMap={soundMap}
+                                    />
+                                ) : stream.type === 'GLB_GALLERY' ? (
+                                    <ThreeDWindow 
+                                        id={`source-${stream.id}`}
+                                        onStreamReady={(s) => updateWhiteboardStream(stream.id, s)}
+                                        config={threeDState[stream.id]}
                                     />
                                 ) : (
                                     <StreamVideoPreview id={`source-${stream.id}`} stream={stream.stream} />
@@ -936,7 +1033,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
             {/* Stream Settings Modal */}
             {showStreamSettings && (
                 <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center">
-                    <div className="bg-[#18181b] border border-white/10 rounded-xl p-6 w-96 shadow-2xl">
+                    <div className="bg-black border border-zinc-800 rounded-xl p-6 w-96 shadow-2xl">
                         <div className="flex items-center justify-between mb-4">
                             <h2 className="text-lg font-bold text-white flex items-center gap-2"><Icons.Signal size={18} className="text-lime-500" /> Stream Settings</h2>
                             <button onClick={() => setShowStreamSettings(false)}><Icons.X size={18} className="text-gray-400 hover:text-white" /></button>
@@ -948,7 +1045,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                                 <input 
                                     type="text" 
                                     placeholder="rtmp://live.twitch.tv/app/"
-                                    className="w-full bg-[#27272a] border border-white/10 rounded p-2 text-sm text-white focus:border-lime-500 focus:outline-none"
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded p-2 text-sm text-white focus:border-lime-500 focus:outline-none"
                                     value={streamConfig.url}
                                     onChange={e => setStreamConfig({...streamConfig, url: e.target.value})}
                                 />
@@ -958,13 +1055,13 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                                 <input 
                                     type="password" 
                                     placeholder="••••••••••••"
-                                    className="w-full bg-[#27272a] border border-white/10 rounded p-2 text-sm text-white focus:border-lime-500 focus:outline-none"
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded p-2 text-sm text-white focus:border-lime-500 focus:outline-none"
                                     value={streamConfig.key}
                                     onChange={e => setStreamConfig({...streamConfig, key: e.target.value})}
                                 />
                             </div>
                             
-                            <div className="bg-yellow-900/20 border border-yellow-500/20 p-3 rounded text-[10px] text-yellow-200">
+                            <div className="bg-zinc-900 border border-zinc-800 p-3 rounded text-[10px] text-gray-400">
                                 <strong>Important:</strong> Browser-based RTMP streaming requires a <b>Local Relay Server</b>.
                                 <br/><br/>
                                 1. Install dependencies: <code>npm install ws</code>
@@ -972,6 +1069,16 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                                 2. Run: <code>node streaming-server.js</code>
                                 <br/>
                                 3. Ensure <b>ffmpeg</b> is installed on your system.
+                                <br/><br/>
+                                <button 
+                                    onClick={() => {
+                                        navigator.clipboard.writeText("node streaming-server.js");
+                                        alert("Command copied to clipboard!");
+                                    }}
+                                    className="mt-2 w-full py-1.5 bg-zinc-800 hover:bg-zinc-700 text-lime-400 rounded flex items-center justify-center gap-2 transition-colors border border-zinc-700"
+                                >
+                                    <Icons.Terminal size={12} /> Copy Start Command
+                                </button>
                             </div>
 
                             <button 
@@ -980,6 +1087,124 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             >
                                 <Icons.Signal size={16} /> Go Live
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Piano Soundboard Settings Modal */}
+            {showPianoSettings && (
+                 <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center">
+                    <div className="bg-black border border-zinc-800 rounded-xl p-6 w-96 shadow-2xl h-[400px] flex flex-col">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-bold text-white flex items-center gap-2"><Icons.Music size={18} className="text-lime-500" /> Sound Settings</h2>
+                            <button onClick={() => setShowPianoSettings(null)}><Icons.X size={18} className="text-gray-400 hover:text-white" /></button>
+                        </div>
+                        <p className="text-xs text-gray-400 mb-4">Map custom .mp3 or .wav files to piano keys. If no file is set, the default synthesizer is used.</p>
+                        
+                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
+                             {KEY_MAP.map(k => (
+                                 <div key={k.key} className="flex items-center gap-2 bg-zinc-900 p-2 rounded border border-zinc-800">
+                                     <div className="w-8 h-8 flex items-center justify-center bg-black border border-zinc-800 rounded text-lime-500 font-bold uppercase">{k.key}</div>
+                                     <div className="flex-1 truncate text-xs text-gray-300">
+                                         {soundMap[k.key] ? soundMap[k.key].name : 'Default Synth'}
+                                     </div>
+                                     <label className="cursor-pointer bg-zinc-800 hover:bg-lime-900 text-white p-1.5 rounded">
+                                         <Icons.Upload size={14} />
+                                         <input type="file" accept="audio/*" className="hidden" onChange={async (e) => {
+                                             if (e.target.files && e.target.files[0]) {
+                                                 const file = e.target.files[0];
+                                                 const arrayBuffer = await file.arrayBuffer();
+                                                 const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                                                 const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+                                                 setSoundMap(prev => ({...prev, [k.key]: { buffer: audioBuffer, name: file.name }}));
+                                                 ctx.close();
+                                             }
+                                         }} />
+                                     </label>
+                                     {soundMap[k.key] && (
+                                         <button onClick={() => {
+                                             const newMap = {...soundMap};
+                                             delete newMap[k.key];
+                                             setSoundMap(newMap);
+                                         }} className="text-red-400 hover:text-red-300"><Icons.Trash size={14} /></button>
+                                     )}
+                                 </div>
+                             ))}
+                        </div>
+                    </div>
+                 </div>
+            )}
+
+            {/* 3D Settings Modal */}
+            {showThreeDSettings && (
+                <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center">
+                    <div className="bg-black border border-zinc-800 rounded-xl p-6 w-96 shadow-2xl h-[500px] flex flex-col">
+                         <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-bold text-white flex items-center gap-2"><Icons.Box size={18} className="text-lime-500" /> 3D Viewer Settings</h2>
+                            <button onClick={() => setShowThreeDSettings(null)}><Icons.X size={18} className="text-gray-400 hover:text-white" /></button>
+                        </div>
+                        
+                        <div className="space-y-4 mb-4">
+                             <div className="space-y-1">
+                                 <label className="text-xs text-gray-400 uppercase">Rotation Speed</label>
+                                 <input 
+                                    type="range" min="0" max="0.1" step="0.001"
+                                    value={threeDState[showThreeDSettings]?.rotationSpeed || 0.01}
+                                    onChange={(e) => setThreeDState(prev => ({
+                                        ...prev, [showThreeDSettings]: { ...prev[showThreeDSettings], rotationSpeed: parseFloat(e.target.value) }
+                                    }))}
+                                    className="w-full accent-lime-500"
+                                 />
+                             </div>
+                             <div className="space-y-1">
+                                 <label className="text-xs text-gray-400 uppercase">Slide Duration (s)</label>
+                                 <input 
+                                    type="range" min="2" max="60" step="1"
+                                    value={threeDState[showThreeDSettings]?.slideDuration || 10}
+                                    onChange={(e) => setThreeDState(prev => ({
+                                        ...prev, [showThreeDSettings]: { ...prev[showThreeDSettings], slideDuration: parseFloat(e.target.value) }
+                                    }))}
+                                    className="w-full accent-lime-500"
+                                 />
+                                 <div className="text-right text-[10px] text-gray-400">{threeDState[showThreeDSettings]?.slideDuration}s</div>
+                             </div>
+                        </div>
+
+                        <label className="w-full bg-lime-900 hover:bg-lime-800 text-white py-2 rounded border border-lime-700 flex items-center justify-center gap-2 cursor-pointer mb-4">
+                            <Icons.Upload size={14} /> Upload GLB File
+                            <input type="file" accept=".glb,.gltf" multiple className="hidden" onChange={(e) => {
+                                if (e.target.files) {
+                                    const newFiles = Array.from(e.target.files as FileList).map((f: File) => ({ url: URL.createObjectURL(f), name: f.name }));
+                                    setThreeDState(prev => ({
+                                        ...prev, [showThreeDSettings]: { 
+                                            ...prev[showThreeDSettings], 
+                                            models: [...(prev[showThreeDSettings]?.models || []), ...newFiles]
+                                        }
+                                    }));
+                                }
+                            }} />
+                        </label>
+
+                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 border-t border-zinc-800 pt-2">
+                             <h3 className="text-xs font-bold text-gray-500 uppercase">Library</h3>
+                             {threeDState[showThreeDSettings]?.models.length === 0 && <p className="text-xs text-gray-600 italic">No models uploaded.</p>}
+                             {threeDState[showThreeDSettings]?.models.map((m, idx) => (
+                                 <div key={idx} className="flex items-center justify-between bg-zinc-900 p-2 rounded border border-zinc-800">
+                                     <span className="text-xs text-white truncate max-w-[200px]">{m.name}</span>
+                                     <button 
+                                        className="text-red-400 hover:text-red-300"
+                                        onClick={() => setThreeDState(prev => ({
+                                            ...prev, [showThreeDSettings]: {
+                                                ...prev[showThreeDSettings],
+                                                models: prev[showThreeDSettings].models.filter((_, i) => i !== idx)
+                                            }
+                                        }))}
+                                     >
+                                         <Icons.Trash size={14} />
+                                     </button>
+                                 </div>
+                             ))}
                         </div>
                     </div>
                 </div>
@@ -995,72 +1220,94 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
             {/* Context Menu */}
             {contextMenu && contextMenu.visible && (
                 <div 
-                    className="fixed z-[100] bg-[#27272a] border border-lime-500/30 rounded-lg shadow-xl py-1 w-56 text-sm"
+                    className="fixed z-[100] bg-black border border-zinc-800 rounded-lg shadow-xl py-1 w-56 text-sm"
                     style={{ top: contextMenu.y, left: contextMenu.x }}
                     onClick={(e) => e.stopPropagation()}
                 >
                     {contextMenu.type === 'CANVAS' ? (
                         <>
                              <div className="px-4 py-1 text-[10px] text-gray-500 font-bold uppercase">Add Source</div>
-                             <button className="w-full text-left px-4 py-2 hover:bg-lime-900/50 flex items-center gap-2" onClick={() => { addScreenShare(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
+                             <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => { addScreenShare(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
                                  <Icons.Monitor size={14} /> Screen Share
                              </button>
-                             <button className="w-full text-left px-4 py-2 hover:bg-lime-900/50 flex items-center gap-2" onClick={() => { addCamera(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
+                             <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => { addCamera(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
                                  <Icons.Video size={14} /> Webcam
                              </button>
-                             <button className="w-full text-left px-4 py-2 hover:bg-lime-900/50 flex items-center gap-2" onClick={() => { addMicrophone(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
+                             <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => { addMicrophone(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
                                  <Icons.Mic size={14} /> Microphone
                              </button>
-                             <button className="w-full text-left px-4 py-2 hover:bg-lime-900/50 flex items-center gap-2" onClick={() => { addWhiteboard(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
+                             <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => { addWhiteboard(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
                                  <Icons.Brush size={14} /> Whiteboard
+                             </button>
+                             <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => { addPiano(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
+                                 <Icons.Keyboard size={14} /> Synthesizer
+                             </button>
+                             <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => { add3DViewer(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
+                                 <Icons.Box size={14} /> 3D Objects
                              </button>
                         </>
                     ) : (
                         <>
                             <button 
-                                className="w-full text-left px-4 py-2 hover:bg-white/10 flex items-center gap-2 text-red-400"
+                                className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2 text-red-400"
                                 onClick={() => removeStream(contextMenu.streamId!)}
                             >
                                 <Icons.Trash size={14} /> Delete
                             </button>
                             
                             <button 
-                                className="w-full text-left px-4 py-2 hover:bg-white/10 flex items-center gap-2"
+                                className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2"
                                 onClick={() => fitToSource(contextMenu.streamId!)}
                             >
                                 <Icons.Maximize size={14} /> Fit to Source
                             </button>
 
-                            {/* Whiteboard Toggle */}
-                            {streams.find(s => s.id === contextMenu.streamId)?.type === 'WHITEBOARD' && (
+                            {/* Whiteboard/Piano Toggle */}
+                            {(streams.find(s => s.id === contextMenu.streamId)?.type === 'WHITEBOARD' || streams.find(s => s.id === contextMenu.streamId)?.type === 'KEYBOARD') && (
                                 <button 
-                                    className="w-full text-left px-4 py-2 hover:bg-white/10 flex items-center gap-2 text-lime-400"
+                                    className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2 text-lime-400"
                                     onClick={() => {
                                         const s = streams.find(st => st.id === contextMenu.streamId);
                                         if (s) setStreamDraggable(s.id, !s.isDraggable); 
                                         setContextMenu(null);
                                     }}
                                 >
-                                    <Icons.Brush size={14} /> 
-                                    {streams.find(s => s.id === contextMenu.streamId)?.isDraggable !== false ? 'Enable Drawing' : 'Disable Drawing'}
+                                    {streams.find(s => s.id === contextMenu.streamId)?.type === 'WHITEBOARD' ? <Icons.Brush size={14} /> : <Icons.Music size={14} />}
+                                    {streams.find(s => s.id === contextMenu.streamId)?.isDraggable !== false ? (streams.find(s => s.id === contextMenu.streamId)?.type === 'WHITEBOARD' ? 'Enable Drawing' : 'Enable Playing') : (streams.find(s => s.id === contextMenu.streamId)?.type === 'WHITEBOARD' ? 'Disable Drawing' : 'Disable Playing')}
                                 </button>
                             )}
 
-                            {/* Mic Toggle */}
+                            {/* Mic Toggle & Selection */}
                             {streams.find(s => s.id === contextMenu.streamId)?.type === 'AUDIO' && (
-                                <button 
-                                    className="w-full text-left px-4 py-2 hover:bg-white/10 flex items-center gap-2 text-lime-400"
-                                    onClick={() => toggleMute(contextMenu.streamId!)}
-                                >
-                                    {streams.find(s => s.id === contextMenu.streamId)?.muted ? <Icons.Mic size={14} /> : <Icons.X size={14} />}
-                                    {streams.find(s => s.id === contextMenu.streamId)?.muted ? 'Turn On' : 'Turn Off'}
-                                </button>
+                                <>
+                                    <button 
+                                        className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2 text-lime-400"
+                                        onClick={() => toggleMute(contextMenu.streamId!)}
+                                    >
+                                        {streams.find(s => s.id === contextMenu.streamId)?.muted ? <Icons.Mic size={14} /> : <Icons.X size={14} />}
+                                        {streams.find(s => s.id === contextMenu.streamId)?.muted ? 'Turn On' : 'Turn Off'}
+                                    </button>
+                                    <div className="h-[1px] bg-zinc-800 my-1" />
+                                    <div className="px-4 py-1 text-[10px] text-gray-500 font-bold uppercase">Select Input</div>
+                                    {audioDevices.map(d => (
+                                        <button
+                                            key={d.deviceId}
+                                            className={`w-full text-left px-4 py-2 hover:bg-zinc-900 truncate text-xs ${streams.find(s => s.id === contextMenu.streamId)?.deviceId === d.deviceId ? 'text-lime-400' : 'text-white'}`}
+                                            onClick={() => {
+                                                switchStreamSource(contextMenu.streamId!, d.deviceId);
+                                                setContextMenu(null);
+                                            }}
+                                        >
+                                            {d.label || `Mic ${d.deviceId.substr(0,4)}`}
+                                        </button>
+                                    ))}
+                                </>
                             )}
                             
                             {/* Chroma Key Toggle */}
                             {streams.find(s => s.id === contextMenu.streamId)?.type === 'CAMERA' && (
                                 <button 
-                                    className="w-full text-left px-4 py-2 hover:bg-white/10 flex items-center gap-2 text-lime-400"
+                                    className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2 text-lime-400"
                                     onClick={() => toggleChromaKey(contextMenu.streamId!)}
                                 >
                                     <Icons.Magic size={14} /> {streams.find(s => s.id === contextMenu.streamId)?.chromaKey ? 'Disable' : 'Enable'} Chroma Key
@@ -1070,12 +1317,12 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             {/* Camera Switching */}
                             {streams.find(s => s.id === contextMenu.streamId)?.type === 'CAMERA' && videoDevices.length > 1 && (
                                 <>
-                                    <div className="h-[1px] bg-white/10 my-1" />
+                                    <div className="h-[1px] bg-zinc-800 my-1" />
                                     <div className="px-4 py-1 text-[10px] text-gray-500 font-bold uppercase">Switch Camera</div>
                                     {videoDevices.map(d => (
                                         <button
                                             key={d.deviceId}
-                                            className={`w-full text-left px-4 py-2 hover:bg-lime-900/50 truncate text-xs ${streams.find(s => s.id === contextMenu.streamId)?.deviceId === d.deviceId ? 'text-lime-400' : 'text-white'}`}
+                                            className={`w-full text-left px-4 py-2 hover:bg-zinc-900 truncate text-xs ${streams.find(s => s.id === contextMenu.streamId)?.deviceId === d.deviceId ? 'text-lime-400' : 'text-white'}`}
                                             onClick={() => {
                                                 switchStreamSource(contextMenu.streamId!, d.deviceId);
                                                 setContextMenu(null);
@@ -1102,6 +1349,119 @@ const StreamVideoPreview: React.FC<{ stream: MediaStream, id: string }> = ({ str
         }
     }, [stream]);
     return <video id={id} ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover bg-black" />;
+};
+
+const ThreeDWindow: React.FC<{
+    id: string,
+    onStreamReady: (s: MediaStream) => void,
+    config?: ThreeDConfig
+}> = ({ id, onStreamReady, config }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const rendererRef = useRef<any>(null);
+    const sceneRef = useRef<any>(null);
+    const cameraRef = useRef<any>(null);
+    const modelRef = useRef<any>(null);
+    const timerRef = useRef<any>(null);
+    
+    // Init Three
+    useEffect(() => {
+        if (!containerRef.current || !canvasRef.current) return;
+        
+        const w = 400; 
+        const h = 400;
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000); 
+        
+        const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 1000);
+        camera.position.z = 5;
+
+        const renderer = new THREE.WebGLRenderer({ canvas: canvasRef.current, preserveDrawingBuffer: true, alpha: true });
+        renderer.setSize(w, h);
+        
+        const light = new THREE.DirectionalLight(0xffffff, 2);
+        light.position.set(2, 2, 5);
+        scene.add(light);
+        const ambient = new THREE.AmbientLight(0x404040, 2);
+        scene.add(ambient);
+
+        rendererRef.current = renderer;
+        sceneRef.current = scene;
+        cameraRef.current = camera;
+        
+        // Start Loop
+        const animate = () => {
+            requestAnimationFrame(animate);
+            if (modelRef.current && config) {
+                modelRef.current.rotation.y += config.rotationSpeed || 0.01;
+            }
+            renderer.render(scene, camera);
+        };
+        animate();
+        
+        // Capture Stream
+        const stream = canvasRef.current.captureStream(30);
+        onStreamReady(stream);
+
+    }, []);
+
+    // Load Model Logic
+    useEffect(() => {
+        if (!config || config.models.length === 0 || !sceneRef.current) return;
+        
+        // Safety check index
+        const safeIndex = currentIndex % config.models.length;
+        const item = config.models[safeIndex];
+        
+        const loader = new GLTFLoader();
+        
+        if (modelRef.current) {
+            sceneRef.current.remove(modelRef.current);
+            modelRef.current = null;
+        }
+
+        loader.load(item.url, (gltf: any) => {
+            const model = gltf.scene;
+            // Center Model
+            const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
+            model.position.sub(center);
+            
+            sceneRef.current.add(model);
+            modelRef.current = model;
+        });
+        
+        if (timerRef.current) clearTimeout(timerRef.current);
+        
+        timerRef.current = setTimeout(() => {
+            setCurrentIndex((prev) => (prev + 1) % config.models.length);
+        }, (config.slideDuration || 10) * 1000); 
+
+        return () => clearTimeout(timerRef.current);
+    }, [config?.models, currentIndex, config?.slideDuration]);
+
+    return (
+        <div 
+            className="w-full h-full relative"
+        >
+            <canvas id={id} ref={canvasRef} className="w-full h-full" />
+            
+            {(!config || config.models.length === 0) && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                     <div className="text-center text-gray-500">
+                         <Icons.Box size={40} className="mx-auto mb-2 text-lime-900" />
+                         <p className="text-xs">Use <Icons.Settings size={10} className="inline"/> to upload GLB files</p>
+                     </div>
+                </div>
+            )}
+            
+            <div className="absolute bottom-2 left-2 text-[10px] text-lime-500 bg-black/50 px-2 rounded">
+                {config && config.models.length > 0 ? `${config.models[currentIndex % config.models.length]?.name} (${(currentIndex % config.models.length) + 1}/${config.models.length})` : 'No Models'}
+            </div>
+        </div>
+    );
 };
 
 const WhiteboardWindow: React.FC<{ 
@@ -1203,7 +1563,7 @@ const WhiteboardWindow: React.FC<{
     return (
         <div className="w-full h-full bg-[#1e1e1e] flex flex-row">
             {isDrawingMode && (
-                <div className="w-12 bg-[#2d2d2d] flex flex-col items-center py-2 gap-3 shrink-0 border-r border-white/5 animate-in slide-in-from-left-2 overflow-y-auto custom-scrollbar">
+                <div className="w-12 bg-black flex flex-col items-center py-2 gap-3 shrink-0 border-r border-zinc-800 animate-in slide-in-from-left-2 overflow-y-auto custom-scrollbar">
                     <input type="color" value={color} onChange={e => setColor(e.target.value)} className="w-6 h-6 rounded cursor-pointer bg-transparent border-none shrink-0" disabled={isEraser} />
                     
                     <div className="w-full px-1 flex flex-col items-center gap-1">
@@ -1220,7 +1580,7 @@ const WhiteboardWindow: React.FC<{
                     </button>
                     
                     <button 
-                        className="text-[10px] w-8 py-1 bg-gray-700 text-white rounded hover:bg-gray-600 disabled:opacity-50 shrink-0"
+                        className="text-[10px] w-8 py-1 bg-zinc-800 text-white rounded hover:bg-zinc-700 disabled:opacity-50 shrink-0"
                         onClick={handleUndo}
                         disabled={undoStack.length <= 1}
                     >
@@ -1255,6 +1615,245 @@ const WhiteboardWindow: React.FC<{
                     onMouseLeave={stopDraw}
                 />
             </div>
+        </div>
+    );
+};
+
+// Piano Logic
+const NOTES: Record<string, number> = {
+    'a': 261.63, // C4
+    'w': 277.18, // C#4
+    's': 293.66, // D4
+    'e': 311.13, // D#4
+    'd': 329.63, // E4
+    'f': 349.23, // F4
+    't': 369.99, // F#4
+    'g': 392.00, // G4
+    'y': 415.30, // G#4
+    'h': 440.00, // A4
+    'u': 466.16, // A#4
+    'j': 493.88, // B4
+    'k': 523.25  // C5
+};
+
+const KEY_MAP = [
+    { key: 'a', note: 'C', type: 'white', x: 0 },
+    { key: 'w', note: 'C#', type: 'black', x: 10 },
+    { key: 's', note: 'D', type: 'white', x: 14.28 },
+    { key: 'e', note: 'D#', type: 'black', x: 28 },
+    { key: 'd', note: 'E', type: 'white', x: 28.56 },
+    { key: 'f', note: 'F', type: 'white', x: 42.84 },
+    { key: 't', note: 'F#', type: 'black', x: 52 },
+    { key: 'g', note: 'G', type: 'white', x: 57.12 },
+    { key: 'y', note: 'G#', type: 'black', x: 68 },
+    { key: 'h', note: 'A', type: 'white', x: 71.4 },
+    { key: 'u', note: 'A#', type: 'black', x: 84 },
+    { key: 'j', note: 'B', type: 'white', x: 85.68 }
+];
+
+const PianoWindow: React.FC<{
+    id: string,
+    onStreamReady: (s: MediaStream) => void,
+    isPlayable: boolean,
+    soundMap: Record<string, { buffer: AudioBuffer, name: string }>
+}> = ({ id, onStreamReady, isPlayable, soundMap }) => {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const audioCtxRef = useRef<AudioContext | null>(null);
+    const oscillatorsRef = useRef<Map<string, OscillatorNode>>(new Map());
+    const gainNodesRef = useRef<Map<string, GainNode>>(new Map());
+    const activeSourcesRef = useRef<Map<string, AudioBufferSourceNode>>(new Map());
+    const destRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+    const [activeKeys, setActiveKeys] = useState<Set<string>>(new Set());
+
+    // Init Audio Context & Canvas Stream
+    useEffect(() => {
+        if (!audioCtxRef.current) {
+            audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+            destRef.current = audioCtxRef.current.createMediaStreamDestination();
+        }
+
+        if (canvasRef.current && destRef.current) {
+            // Setup Visuals
+            const stream = canvasRef.current.captureStream(30);
+            // Add Audio Track from Synth
+            stream.addTrack(destRef.current.stream.getAudioTracks()[0]);
+            onStreamReady(stream);
+        }
+        
+        // Initial Draw
+        drawPiano();
+    }, []);
+
+    const playNote = (key: string) => {
+        if (!audioCtxRef.current || !destRef.current) return;
+        if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
+
+        // Check for Custom Sound
+        if (soundMap[key]) {
+             if (activeSourcesRef.current.has(key)) return; 
+             const source = audioCtxRef.current.createBufferSource();
+             source.buffer = soundMap[key].buffer;
+             source.connect(destRef.current);
+             source.start();
+             source.onended = () => {
+                 activeSourcesRef.current.delete(key);
+                 setActiveKeys(prev => {
+                    const next = new Set(prev);
+                    next.delete(key);
+                    return next;
+                 });
+                 drawPiano(); // re-draw on finish
+             };
+             activeSourcesRef.current.set(key, source);
+             setActiveKeys(prev => new Set(prev).add(key));
+             return;
+        }
+
+        // Default Synth
+        if (!NOTES[key]) return;
+        if (oscillatorsRef.current.has(key)) return; // Already playing
+
+        const osc = audioCtxRef.current.createOscillator();
+        const gain = audioCtxRef.current.createGain();
+        
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(NOTES[key], audioCtxRef.current.currentTime);
+        
+        gain.gain.setValueAtTime(0.2, audioCtxRef.current.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtxRef.current.currentTime + 1.5);
+
+        osc.connect(gain);
+        gain.connect(destRef.current);
+        
+        osc.start();
+        oscillatorsRef.current.set(key, osc);
+        gainNodesRef.current.set(key, gain);
+        
+        setActiveKeys(prev => new Set(prev).add(key));
+    };
+
+    const stopNote = (key: string) => {
+        // Stop Synth
+        if (oscillatorsRef.current.has(key)) {
+            const osc = oscillatorsRef.current.get(key);
+            const gain = gainNodesRef.current.get(key);
+            
+            if (osc && gain && audioCtxRef.current) {
+                gain.gain.cancelScheduledValues(audioCtxRef.current.currentTime);
+                gain.gain.setValueAtTime(gain.gain.value, audioCtxRef.current.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtxRef.current.currentTime + 0.1);
+                osc.stop(audioCtxRef.current.currentTime + 0.1);
+            }
+
+            oscillatorsRef.current.delete(key);
+            gainNodesRef.current.delete(key);
+        }
+
+        // Note: We don't stop custom samples abruptly, let them ring out.
+        
+        setActiveKeys(prev => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
+        });
+    };
+
+    useEffect(() => {
+        const handleDown = (e: KeyboardEvent) => {
+            if (!isPlayable) return;
+            if ((NOTES[e.key] || soundMap[e.key]) && !e.repeat) {
+                playNote(e.key);
+            }
+        };
+
+        const handleUp = (e: KeyboardEvent) => {
+            if (!isPlayable) return;
+            if ((NOTES[e.key] || soundMap[e.key])) stopNote(e.key);
+        };
+
+        window.addEventListener('keydown', handleDown);
+        window.addEventListener('keyup', handleUp);
+        return () => {
+            window.removeEventListener('keydown', handleDown);
+            window.removeEventListener('keyup', handleUp);
+        };
+    }, [isPlayable, soundMap]);
+
+    // Render Logic
+    const drawPiano = () => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const w = canvas.width;
+        const h = canvas.height;
+        
+        ctx.fillStyle = '#111';
+        ctx.fillRect(0, 0, w, h);
+        
+        const whiteKeyWidth = w / 7;
+
+        // Draw White Keys
+        KEY_MAP.filter(k => k.type === 'white').forEach((k, i) => {
+            ctx.fillStyle = activeKeys.has(k.key) ? '#84cc16' : '#ffffff'; // Lime for active
+            ctx.fillRect(i * whiteKeyWidth + 2, 2, whiteKeyWidth - 4, h - 4);
+            
+            // Label
+            ctx.fillStyle = activeKeys.has(k.key) ? '#000' : '#888';
+            ctx.font = '20px sans-serif';
+            ctx.fillText(k.key.toUpperCase(), i * whiteKeyWidth + whiteKeyWidth/2 - 8, h - 20);
+            
+            // File Indicator
+            if (soundMap[k.key]) {
+                ctx.fillStyle = '#65a30d';
+                ctx.beginPath();
+                ctx.arc(i * whiteKeyWidth + whiteKeyWidth/2, h - 50, 4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        });
+
+        // Draw Black Keys
+        const blackKeyWidth = whiteKeyWidth * 0.6;
+        const blackKeyHeight = h * 0.6;
+        
+        KEY_MAP.filter(k => k.type === 'black').forEach((k) => {
+             // Calculate position based on percentage x
+             const x = (k.x / 100) * w; 
+             ctx.fillStyle = activeKeys.has(k.key) ? '#4d7c0f' : '#000000'; // Dark Lime for active
+             ctx.fillRect(x, 0, blackKeyWidth, blackKeyHeight);
+             
+             ctx.fillStyle = '#fff';
+             ctx.font = '14px sans-serif';
+             ctx.fillText(k.key.toUpperCase(), x + blackKeyWidth/2 - 5, blackKeyHeight - 10);
+             
+             if (soundMap[k.key]) {
+                ctx.fillStyle = '#84cc16';
+                ctx.beginPath();
+                ctx.arc(x + blackKeyWidth/2, blackKeyHeight - 30, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        });
+    };
+
+    useEffect(() => {
+        drawPiano();
+    }, [activeKeys, soundMap]);
+
+    return (
+        <div className="w-full h-full bg-zinc-900 flex flex-col items-center justify-center">
+            <canvas 
+                id={id}
+                ref={canvasRef}
+                width={600}
+                height={300}
+                className="w-full h-full"
+            />
+            {!isPlayable && (
+                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center pointer-events-none">
+                     <span className="text-white text-xs bg-black/50 px-2 py-1 rounded">Right Click to Play</span>
+                 </div>
+            )}
         </div>
     );
 };

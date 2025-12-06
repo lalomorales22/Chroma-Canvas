@@ -2,6 +2,7 @@ import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { EditorState, CanvasElement, ContextMenuState, ElementType } from '../../types';
 import { TRACK_HEIGHT, DEFAULT_ZOOM } from '../../constants';
 import { ElementBlock } from './ElementBlock';
+import { Icons } from '../Icon';
 
 interface TimelineProps {
   state: EditorState;
@@ -36,8 +37,20 @@ export const Timeline: React.FC<TimelineProps> = ({ state, dispatch, onContextMe
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const handleFitToScreen = () => {
+      if (!containerRef.current) return;
+      const width = containerRef.current.clientWidth;
+      // Calculate zoom to fit duration into width
+      // width = duration * zoom  =>  zoom = width / duration
+      // Add some buffer duration
+      const targetDuration = Math.max(state.duration, 30);
+      const newZoom = (width - 50) / targetDuration; 
+      dispatch({ type: 'SET_ZOOM', payload: newZoom });
+  };
+
   const renderRuler = () => {
     const ticks = [];
+    // Ensure we render enough ruler for the view
     const totalSeconds = Math.max(state.duration + 60, 300);
     const step = state.zoom > 60 ? 1 : state.zoom > 30 ? 5 : 10;
     
@@ -304,8 +317,15 @@ export const Timeline: React.FC<TimelineProps> = ({ state, dispatch, onContextMe
     >
       <div className="min-w-full min-h-full relative">
         {/* Ruler */}
-        <div className="sticky top-0 left-0 right-0 h-10 bg-[#18181b] border-b border-white/10 z-30 overflow-hidden">
-          {renderRuler()}
+        <div className="sticky top-0 left-0 right-0 h-10 bg-[#18181b] border-b border-white/10 z-30 overflow-hidden flex items-center">
+            {renderRuler()}
+            <button 
+                onClick={handleFitToScreen}
+                className="fixed right-8 top-[104px] z-50 bg-black/60 hover:bg-lime-900/80 text-white p-1 rounded border border-white/20 text-[10px] flex items-center gap-1 backdrop-blur"
+                title="Fit Timeline to Screen"
+            >
+                <Icons.Maximize size={10} /> Fit View
+            </button>
         </div>
 
         {/* Tracks Area */}
