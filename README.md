@@ -2,10 +2,10 @@
 # ChromaCanvas 🎨🎬
 
 <div align="center">
-  <img width="700" alt="ChromaCanvas Editor Interface" src="https://github.com/user-attachments/assets/224d9993-1500-4f38-b5d6-3f45e8965b7d" />
+  <img width="700" alt="ChromaCanvas Editor Interface" src="https://github.com/user-attachments/assets/b9c1cc4a-222a-4665-b4fc-2fd3ae7a2fe9" />
   <p><em>The Infinite Canvas Editor</em></p>
   <br/>
-  <img width="670" alt="Studio Interface" src="https://github.com/user-attachments/assets/4cd8bd23-07c7-46e0-b1ad-845d7fc62ea9" />
+  <img width="670" alt="Studio Interface" src="https://github.com/user-attachments/assets/977f5f12-349f-4ebc-972d-15e3b74104da" />
   <p><em>The Multi-Source Recorder Studio</em></p>
 </div>
 
