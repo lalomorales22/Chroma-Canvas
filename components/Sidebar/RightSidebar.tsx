@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { EditorState, CanvasElement, ElementType } from '../../types';
+import { EditorState, CanvasElement, ElementType, LibraryItem } from '../../types';
 import { Icons } from '../Icon';
 import { generateImage } from '../../services/geminiService';
 import { DEFAULT_IMAGE_DURATION, DEFAULT_EMOJIS, DEFAULT_FONT_SIZE } from '../../constants';
@@ -168,6 +168,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
   // Refs for export rendering
   const exportCanvasRef = useRef<HTMLCanvasElement>(null);
   const mediaElementsRef = useRef<Map<string, HTMLMediaElement>>(new Map());
+  // Persistent Audio Context for exports to avoid "already connected" errors
+  const exportAudioCtxRef = useRef<AudioContext | null>(null);
   const audioSourceNodeCache = useRef<WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>>(new WeakMap());
 
   // Helper: Get primary selected element (last selected usually, or first)
@@ -335,7 +337,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       if (!aiPrompt) return;
       setIsGenerating(true);
 
-      const promptStr = String(aiPrompt);
+      const promptStr = aiPrompt;
       let finalPrompt: string = promptStr;
       let finalName: string = promptStr;
       
@@ -347,13 +349,12 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       const imageUrl = await generateImage(finalPrompt);
       
       if (imageUrl) {
-          const newItem = {
+          const newItem: LibraryItem = {
               id: Math.random().toString(36),
               type: ElementType.IMAGE,
-              // Fix: Explicitly cast to string to handle potential unknown type
-              src: String(imageUrl),
-              name: String(finalName),
-              category: 'IMAGE' as const,
+              src: imageUrl,
+              name: finalName,
+              category: 'IMAGE',
               duration: DEFAULT_IMAGE_DURATION
           };
           dispatch({ type: 'ADD_LIBRARY_ITEM', payload: newItem });
@@ -451,6 +452,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       const originalMediaStates = new Map<string, { muted: boolean, volume: number }>();
       const gainNodes = new Map<string, GainNode>();
 
+      // 1. Calculate Actual Content Duration (Fix for trailing black footage)
+      // We ignore state.duration (which is canvas size) and find the last element's end time.
+      const contentEnd = state.elements.reduce((max, el) => Math.max(max, el.startTime + el.duration), 0);
+      const exportDuration = Math.max(1, contentEnd); // Minimum 1 second
+
       try {
         const imageUrls = new Set(state.elements.filter(e => e.type === ElementType.IMAGE).map(e => e.src));
         const imageCache = new Map<string, HTMLImageElement>();
@@ -464,7 +470,15 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
             img.onerror = () => { console.warn("Failed to load image for export:", url); resolve(); };
         })));
 
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        // 2. Initialize or Resume Persistent Audio Context
+        if (!exportAudioCtxRef.current) {
+             exportAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        }
+        const audioCtx = exportAudioCtxRef.current;
+        if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+        }
+
         const dest = audioCtx.createMediaStreamDestination();
         
         state.elements.forEach(el => {
@@ -480,6 +494,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                         let source: MediaElementAudioSourceNode;
                         if (audioSourceNodeCache.current.has(mediaEl)) {
                             source = audioSourceNodeCache.current.get(mediaEl)!;
+                            // Clean up previous connections to avoid double-gain or mixing issues
+                            try { source.disconnect(); } catch(e) {} 
                         } else {
                             source = audioCtx.createMediaElementSource(mediaEl);
                             audioSourceNodeCache.current.set(mediaEl, source);
@@ -519,6 +535,16 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                 }
             });
 
+            // Disconnect sources to clean up graph for next run
+            gainNodes.forEach(g => g.disconnect());
+            state.elements.forEach(el => {
+                 const m = mediaElementsRef.current.get(el.id);
+                 if (m && audioSourceNodeCache.current.has(m)) {
+                     const s = audioSourceNodeCache.current.get(m);
+                     try { s?.disconnect(); } catch(e) {}
+                 }
+            });
+
             const blob = new Blob(chunks, { type: mimeType });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -528,13 +554,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
             a.click();
             URL.revokeObjectURL(url);
             
-            audioCtx.close();
             setIsExporting(false);
         };
 
         recorder.start();
 
-        const duration = Math.max(1, state.duration); 
         const ctx = canvas.getContext('2d', { alpha: false }); 
         if (!ctx) throw new Error("Could not get 2D context");
 
@@ -547,12 +571,13 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                 const now = performance.now();
                 const elapsed = (now - startTime) / 1000;
                 
-                if (elapsed > duration) {
+                // 3. Stop exactly at calculated exportDuration
+                if (elapsed > exportDuration) {
                     recorder.stop();
                     return;
                 }
 
-                setExportProgress(Math.min(100, Math.round((elapsed / duration) * 100)));
+                setExportProgress(Math.min(100, Math.round((elapsed / exportDuration) * 100)));
                 
                 ctx.fillStyle = '#000';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -606,11 +631,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                          if (el.src) {
                              const img = imageCache.get(el.src);
                              if (img) { 
-                                  // CHANGED: Use Math.min for Contain/Fit instead of Math.max for Cover
                                   const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
                                   const w = img.width * scale;
                                   const h = img.height * scale;
-                                  // Draw centered in the translated context
                                   ctx.drawImage(img, -w/2, -h/2, w, h);
                              }
                          }

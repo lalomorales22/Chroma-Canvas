@@ -64,7 +64,8 @@ export const generateAssetUrl = async (prompt: string, type: 'image' | 'text'): 
                 model: 'gemini-2.5-flash',
                 contents: `Generate a short, catchy 3-5 word title for a video about: "${prompt}"`,
             });
-            return response.text.replace(/"/g, '').trim();
+            const text = response.text;
+            return text ? text.replace(/"/g, '').trim() : "New Text Layer";
         } catch (e) {
             return "New Text Layer";
         }
