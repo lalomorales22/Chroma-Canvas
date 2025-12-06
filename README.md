@@ -1,5 +1,7 @@
 
 # ChromaCanvas 🎨🎬
+<img width="700" height="450" alt="Screenshot 2025-12-05 at 7 23 36 PM" src="https://github.com/user-attachments/assets/224d9993-1500-4f38-b5d6-3f45e8965b7d" />
+<img width="670" height="499" alt="Screenshot 2025-12-05 at 7 17 30 PM" src="https://github.com/user-attachments/assets/4cd8bd23-07c7-46e0-b1ad-845d7fc62ea9" />
 
 > A next-generation, AI-powered infinite canvas video editor & recording studio.
 
