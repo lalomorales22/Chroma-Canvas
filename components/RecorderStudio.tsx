@@ -21,6 +21,7 @@ interface ActiveStream {
     deviceId?: string;
     chromaKey?: boolean;
     isDraggable?: boolean; // New: For whiteboard mode
+    muted?: boolean;
 }
 
 // Green Screen Processing Helper
@@ -183,6 +184,12 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
 
     const addScreenShare = async (x: number, y: number) => {
         try {
+            // Check support
+            if (!navigator.mediaDevices?.getDisplayMedia) {
+                alert("Screen sharing is not supported in this browser.");
+                return;
+            }
+
             const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
             const id = Math.random().toString(36).substr(2, 9);
             const track = stream.getVideoTracks()[0];
@@ -201,8 +208,19 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                 height: settings.height ? Math.min(settings.height / 2, 225) : 225,
                 isDraggable: true
             }]);
-        } catch (e) {
-            console.error("Screen share cancelled", e);
+        } catch (e: any) {
+            // Handle specific errors gracefully
+            if (e.name === 'NotAllowedError') {
+                console.log("Screen share was cancelled by the user.");
+                return;
+            }
+            if (e.name === 'SecurityError' || e.message?.includes('permissions policy')) {
+                alert("Screen sharing is blocked by the environment's permission policy. Ensure 'display-capture' is enabled.");
+                return;
+            }
+            
+            console.error("Screen share failed", e);
+            alert(`Could not start screen share: ${e.message || 'Unknown error'}`);
         }
     };
 
@@ -255,7 +273,8 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                 width: 200,
                 height: 100,
                 deviceId: settings.deviceId,
-                isDraggable: true
+                isDraggable: true,
+                muted: false
             }]);
         } catch (e) {
             console.error("Mic access failed", e);
@@ -305,6 +324,18 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
         setContextMenu(null);
     };
 
+    const toggleMute = (id: string) => {
+        setStreams(prev => prev.map(s => {
+            if (s.id === id && s.type === 'AUDIO' && s.stream.getAudioTracks().length > 0) {
+                 const newState = !s.muted;
+                 s.stream.getAudioTracks()[0].enabled = !newState; // if muted, enabled is false
+                 return { ...s, muted: newState };
+            }
+            return s;
+        }));
+        setContextMenu(null);
+    };
+
     const switchStreamSource = async (streamId: string, deviceId: string) => {
         if (isRecording || isStreaming) return; 
 
@@ -345,7 +376,8 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                 originalStream: newStream,
                 name: newName,
                 deviceId: deviceId,
-                chromaKey: false
+                chromaKey: false,
+                muted: false
             } : s));
 
         } catch (e) {
@@ -687,22 +719,22 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
     return (
         <div className="absolute inset-0 bg-[#0f0f11] flex flex-col z-50 animate-in fade-in duration-300">
             {/* Header */}
-            <div className="h-16 border-b border-white/10 flex items-center justify-between px-6 bg-[#18181b]">
+            <div className="h-16 border-b border-lime-900/30 flex items-center justify-between px-6 bg-[#18181b]">
                 <div className="flex items-center gap-4">
                     <button onClick={onBack} disabled={isRecording || isStreaming} className="p-2 hover:bg-white/10 rounded-full disabled:opacity-50">
                         <Icons.Back className="text-white" />
                     </button>
                     <h1 className="text-xl font-bold flex items-center gap-2">
-                        <Icons.Layout className="text-red-500" />
-                        Recorder Studio
+                        <Icons.Layout className="text-lime-500" />
+                        Studio
                     </h1>
                 </div>
                 
                 <div className="flex items-center gap-4">
                     {(isRecording || isStreaming) && (
                         <div className="flex items-center gap-2 font-mono text-xl animate-pulse">
-                            <div className={`w-3 h-3 rounded-full ${isStreaming ? 'bg-purple-500' : 'bg-red-500'}`} />
-                            <span className={isStreaming ? 'text-purple-500' : 'text-red-500'}>
+                            <div className={`w-3 h-3 rounded-full ${isStreaming ? 'bg-lime-500' : 'bg-lime-600'}`} />
+                            <span className={isStreaming ? 'text-lime-500' : 'text-lime-600'}>
                                 {isStreaming ? 'LIVE' : 'REC'} {formatTime(recordingTime)}
                             </span>
                         </div>
@@ -712,7 +744,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                         <>
                             <button 
                                 onClick={() => setShowStreamSettings(true)}
-                                className="flex items-center gap-2 bg-[#27272a] hover:bg-[#3f3f46] text-purple-400 px-4 py-2 rounded-full font-bold transition-all border border-purple-500/30"
+                                className="flex items-center gap-2 bg-[#27272a] hover:bg-[#3f3f46] text-lime-400 px-4 py-2 rounded-full font-bold transition-all border border-lime-500/30"
                             >
                                 <Icons.Signal size={16} />
                                 Stream
@@ -720,7 +752,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             <button 
                                 onClick={startRecording}
                                 disabled={streams.length === 0}
-                                className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-full font-bold transition-all"
+                                className="flex items-center gap-2 bg-lime-700 hover:bg-lime-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-full font-bold transition-all"
                             >
                                 <Icons.Circle size={16} fill="currentColor" />
                                 Start Recording
@@ -742,16 +774,16 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
 
             <div className="flex-1 flex overflow-hidden">
                 {/* Source Palette Sidebar */}
-                <div className="w-64 bg-[#18181b] border-r border-white/10 p-4 flex flex-col gap-6">
+                <div className="w-64 bg-[#18181b] border-r border-lime-900/30 p-4 flex flex-col gap-6">
                     <div>
                         <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Add Sources</h3>
                         <div className="space-y-3">
                             <div 
                                 draggable 
                                 onDragStart={(e) => e.dataTransfer.setData('sourceType', 'SCREEN')}
-                                className="bg-[#27272a] p-4 rounded-xl cursor-grab hover:bg-[#3f3f46] border border-white/5 hover:border-blue-500 transition-all group"
+                                className="bg-[#27272a] p-4 rounded-xl cursor-grab hover:bg-[#3f3f46] border border-white/5 hover:border-lime-500 transition-all group"
                             >
-                                <div className="flex items-center gap-3 mb-2 text-blue-400 group-hover:text-blue-300">
+                                <div className="flex items-center gap-3 mb-2 text-lime-400 group-hover:text-lime-300">
                                     <Icons.Monitor />
                                     <span className="font-bold text-sm">Screen Share</span>
                                 </div>
@@ -761,9 +793,9 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             <div 
                                 draggable 
                                 onDragStart={(e) => e.dataTransfer.setData('sourceType', 'CAMERA')}
-                                className="bg-[#27272a] p-4 rounded-xl cursor-grab hover:bg-[#3f3f46] border border-white/5 hover:border-purple-500 transition-all group"
+                                className="bg-[#27272a] p-4 rounded-xl cursor-grab hover:bg-[#3f3f46] border border-white/5 hover:border-lime-500 transition-all group"
                             >
-                                <div className="flex items-center gap-3 mb-2 text-purple-400 group-hover:text-purple-300">
+                                <div className="flex items-center gap-3 mb-2 text-lime-400 group-hover:text-lime-300">
                                     <Icons.Video />
                                     <span className="font-bold text-sm">Webcam</span>
                                 </div>
@@ -773,9 +805,9 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             <div 
                                 draggable 
                                 onDragStart={(e) => e.dataTransfer.setData('sourceType', 'MIC')}
-                                className="bg-[#27272a] p-4 rounded-xl cursor-grab hover:bg-[#3f3f46] border border-white/5 hover:border-emerald-500 transition-all group"
+                                className="bg-[#27272a] p-4 rounded-xl cursor-grab hover:bg-[#3f3f46] border border-white/5 hover:border-lime-500 transition-all group"
                             >
-                                <div className="flex items-center gap-3 mb-2 text-emerald-400 group-hover:text-emerald-300">
+                                <div className="flex items-center gap-3 mb-2 text-lime-400 group-hover:text-lime-300">
                                     <Icons.Mic />
                                     <span className="font-bold text-sm">Microphone</span>
                                 </div>
@@ -785,9 +817,9 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             <div 
                                 draggable 
                                 onDragStart={(e) => e.dataTransfer.setData('sourceType', 'WHITEBOARD')}
-                                className="bg-[#27272a] p-4 rounded-xl cursor-grab hover:bg-[#3f3f46] border border-white/5 hover:border-orange-500 transition-all group"
+                                className="bg-[#27272a] p-4 rounded-xl cursor-grab hover:bg-[#3f3f46] border border-white/5 hover:border-lime-500 transition-all group"
                             >
-                                <div className="flex items-center gap-3 mb-2 text-orange-400 group-hover:text-orange-300">
+                                <div className="flex items-center gap-3 mb-2 text-lime-400 group-hover:text-lime-300">
                                     <Icons.Brush />
                                     <span className="font-bold text-sm">Whiteboard</span>
                                 </div>
@@ -801,7 +833,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                         <select 
                             value={selectedAudioDevice} 
                             onChange={(e) => setSelectedAudioDevice(e.target.value)}
-                            className="w-full bg-black/40 border border-white/10 rounded px-2 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full bg-black/40 border border-white/10 rounded px-2 py-2 text-xs text-white focus:outline-none focus:border-lime-500"
                         >
                             {audioDevices.map(d => (
                                 <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${d.deviceId.substr(0,4)}`}</option>
@@ -822,8 +854,8 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                     {streams.length === 0 && (
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20">
                             <div className="text-center">
-                                <Icons.Plus className="w-24 h-24 mx-auto mb-4" />
-                                <h2 className="text-4xl font-bold">Right Click to Add Sources</h2>
+                                <Icons.Plus className="w-24 h-24 mx-auto mb-4 text-lime-500" />
+                                <h2 className="text-4xl font-bold text-lime-500">Right Click to Add Sources</h2>
                             </div>
                         </div>
                     )}
@@ -831,7 +863,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                     {streams.map(stream => (
                         <div
                             key={stream.id}
-                            className={`absolute bg-black rounded-lg shadow-2xl border border-white/20 group hover:border-emerald-500 transition-colors ${stream.isDraggable === false ? 'cursor-default' : 'cursor-grab'}`}
+                            className={`absolute bg-black rounded-lg shadow-2xl border border-white/20 group hover:border-lime-500 transition-colors ${stream.isDraggable === false ? 'cursor-default' : 'cursor-grab'}`}
                             style={{ 
                                 left: stream.x, 
                                 top: stream.y, 
@@ -858,11 +890,12 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             {/* Content */}
                             <div className="w-full h-full overflow-hidden relative">
                                 {stream.type === 'AUDIO' ? (
-                                    <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900">
-                                        <Icons.Mic className="w-8 h-8 text-emerald-500 mb-2 animate-pulse" />
+                                    <div className={`w-full h-full flex flex-col items-center justify-center bg-gray-900 ${stream.muted ? 'opacity-50' : ''}`}>
+                                        <Icons.Mic className={`w-8 h-8 mb-2 ${stream.muted ? 'text-gray-500' : 'text-lime-500 animate-pulse'}`} />
                                         <div className="w-1/2 h-1 bg-gray-700 rounded overflow-hidden">
-                                            <div className="h-full bg-emerald-500 w-2/3 animate-[pulse_1s_ease-in-out_infinite]" />
+                                            <div className={`h-full w-2/3 ${stream.muted ? 'bg-gray-500' : 'bg-lime-500 animate-[pulse_1s_ease-in-out_infinite]'}`} />
                                         </div>
+                                        {stream.muted && <span className="text-[10px] text-red-400 mt-2 font-bold uppercase">Muted</span>}
                                     </div>
                                 ) : stream.type === 'WHITEBOARD' ? (
                                     <WhiteboardWindow 
@@ -905,7 +938,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                 <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center">
                     <div className="bg-[#18181b] border border-white/10 rounded-xl p-6 w-96 shadow-2xl">
                         <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-lg font-bold text-white flex items-center gap-2"><Icons.Signal size={18} className="text-purple-500" /> Stream Settings</h2>
+                            <h2 className="text-lg font-bold text-white flex items-center gap-2"><Icons.Signal size={18} className="text-lime-500" /> Stream Settings</h2>
                             <button onClick={() => setShowStreamSettings(false)}><Icons.X size={18} className="text-gray-400 hover:text-white" /></button>
                         </div>
                         
@@ -915,7 +948,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                                 <input 
                                     type="text" 
                                     placeholder="rtmp://live.twitch.tv/app/"
-                                    className="w-full bg-[#27272a] border border-white/10 rounded p-2 text-sm text-white focus:border-purple-500 focus:outline-none"
+                                    className="w-full bg-[#27272a] border border-white/10 rounded p-2 text-sm text-white focus:border-lime-500 focus:outline-none"
                                     value={streamConfig.url}
                                     onChange={e => setStreamConfig({...streamConfig, url: e.target.value})}
                                 />
@@ -925,7 +958,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                                 <input 
                                     type="password" 
                                     placeholder="••••••••••••"
-                                    className="w-full bg-[#27272a] border border-white/10 rounded p-2 text-sm text-white focus:border-purple-500 focus:outline-none"
+                                    className="w-full bg-[#27272a] border border-white/10 rounded p-2 text-sm text-white focus:border-lime-500 focus:outline-none"
                                     value={streamConfig.key}
                                     onChange={e => setStreamConfig({...streamConfig, key: e.target.value})}
                                 />
@@ -943,7 +976,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
 
                             <button 
                                 onClick={startStreaming}
-                                className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 rounded-lg flex items-center justify-center gap-2"
+                                className="w-full bg-lime-700 hover:bg-lime-600 text-white font-bold py-2 rounded-lg flex items-center justify-center gap-2"
                             >
                                 <Icons.Signal size={16} /> Go Live
                             </button>
@@ -962,23 +995,23 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
             {/* Context Menu */}
             {contextMenu && contextMenu.visible && (
                 <div 
-                    className="fixed z-[100] bg-[#27272a] border border-white/10 rounded-lg shadow-xl py-1 w-56 text-sm"
+                    className="fixed z-[100] bg-[#27272a] border border-lime-500/30 rounded-lg shadow-xl py-1 w-56 text-sm"
                     style={{ top: contextMenu.y, left: contextMenu.x }}
                     onClick={(e) => e.stopPropagation()}
                 >
                     {contextMenu.type === 'CANVAS' ? (
                         <>
                              <div className="px-4 py-1 text-[10px] text-gray-500 font-bold uppercase">Add Source</div>
-                             <button className="w-full text-left px-4 py-2 hover:bg-emerald-600 flex items-center gap-2" onClick={() => { addScreenShare(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
+                             <button className="w-full text-left px-4 py-2 hover:bg-lime-900/50 flex items-center gap-2" onClick={() => { addScreenShare(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
                                  <Icons.Monitor size={14} /> Screen Share
                              </button>
-                             <button className="w-full text-left px-4 py-2 hover:bg-purple-600 flex items-center gap-2" onClick={() => { addCamera(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
+                             <button className="w-full text-left px-4 py-2 hover:bg-lime-900/50 flex items-center gap-2" onClick={() => { addCamera(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
                                  <Icons.Video size={14} /> Webcam
                              </button>
-                             <button className="w-full text-left px-4 py-2 hover:bg-emerald-600 flex items-center gap-2" onClick={() => { addMicrophone(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
+                             <button className="w-full text-left px-4 py-2 hover:bg-lime-900/50 flex items-center gap-2" onClick={() => { addMicrophone(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
                                  <Icons.Mic size={14} /> Microphone
                              </button>
-                             <button className="w-full text-left px-4 py-2 hover:bg-orange-600 flex items-center gap-2" onClick={() => { addWhiteboard(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
+                             <button className="w-full text-left px-4 py-2 hover:bg-lime-900/50 flex items-center gap-2" onClick={() => { addWhiteboard(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
                                  <Icons.Brush size={14} /> Whiteboard
                              </button>
                         </>
@@ -1001,10 +1034,10 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             {/* Whiteboard Toggle */}
                             {streams.find(s => s.id === contextMenu.streamId)?.type === 'WHITEBOARD' && (
                                 <button 
-                                    className="w-full text-left px-4 py-2 hover:bg-white/10 flex items-center gap-2 text-orange-400"
+                                    className="w-full text-left px-4 py-2 hover:bg-white/10 flex items-center gap-2 text-lime-400"
                                     onClick={() => {
                                         const s = streams.find(st => st.id === contextMenu.streamId);
-                                        if (s) setStreamDraggable(s.id, !s.isDraggable); // If undefined (true), sets to false (enable drawing). If false, sets to true (disable drawing).
+                                        if (s) setStreamDraggable(s.id, !s.isDraggable); 
                                         setContextMenu(null);
                                     }}
                                 >
@@ -1012,11 +1045,22 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                                     {streams.find(s => s.id === contextMenu.streamId)?.isDraggable !== false ? 'Enable Drawing' : 'Disable Drawing'}
                                 </button>
                             )}
+
+                            {/* Mic Toggle */}
+                            {streams.find(s => s.id === contextMenu.streamId)?.type === 'AUDIO' && (
+                                <button 
+                                    className="w-full text-left px-4 py-2 hover:bg-white/10 flex items-center gap-2 text-lime-400"
+                                    onClick={() => toggleMute(contextMenu.streamId!)}
+                                >
+                                    {streams.find(s => s.id === contextMenu.streamId)?.muted ? <Icons.Mic size={14} /> : <Icons.X size={14} />}
+                                    {streams.find(s => s.id === contextMenu.streamId)?.muted ? 'Turn On' : 'Turn Off'}
+                                </button>
+                            )}
                             
                             {/* Chroma Key Toggle */}
                             {streams.find(s => s.id === contextMenu.streamId)?.type === 'CAMERA' && (
                                 <button 
-                                    className="w-full text-left px-4 py-2 hover:bg-white/10 flex items-center gap-2 text-green-400"
+                                    className="w-full text-left px-4 py-2 hover:bg-white/10 flex items-center gap-2 text-lime-400"
                                     onClick={() => toggleChromaKey(contextMenu.streamId!)}
                                 >
                                     <Icons.Magic size={14} /> {streams.find(s => s.id === contextMenu.streamId)?.chromaKey ? 'Disable' : 'Enable'} Chroma Key
@@ -1031,7 +1075,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                                     {videoDevices.map(d => (
                                         <button
                                             key={d.deviceId}
-                                            className={`w-full text-left px-4 py-2 hover:bg-blue-600 truncate text-xs ${streams.find(s => s.id === contextMenu.streamId)?.deviceId === d.deviceId ? 'text-blue-400' : 'text-white'}`}
+                                            className={`w-full text-left px-4 py-2 hover:bg-lime-900/50 truncate text-xs ${streams.find(s => s.id === contextMenu.streamId)?.deviceId === d.deviceId ? 'text-lime-400' : 'text-white'}`}
                                             onClick={() => {
                                                 switchStreamSource(contextMenu.streamId!, d.deviceId);
                                                 setContextMenu(null);
@@ -1164,7 +1208,7 @@ const WhiteboardWindow: React.FC<{
                     
                     <div className="w-full px-1 flex flex-col items-center gap-1">
                         <span className="text-[8px] text-gray-400">Size</span>
-                        <input type="range" min="1" max="20" value={size} onChange={e => setSize(Number(e.target.value))} className="h-20 w-1 accent-emerald-500 appearance-slider-vertical" style={{ writingMode: 'vertical-lr' }} />
+                        <input type="range" min="1" max="20" value={size} onChange={e => setSize(Number(e.target.value))} className="h-20 w-1 accent-lime-500 appearance-slider-vertical" style={{ writingMode: 'vertical-lr' }} />
                     </div>
                     
                     <button 

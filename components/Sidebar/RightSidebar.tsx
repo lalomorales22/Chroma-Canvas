@@ -555,11 +555,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
   return (
     <div 
-        className="bg-[#18181b] border-l border-white/10 flex flex-col h-full z-50 shadow-xl relative"
+        className="bg-[#18181b] border-l border-lime-900/30 flex flex-col h-full z-50 shadow-xl relative"
         style={{ width: width }}
     >
       <div 
-        className="absolute left-0 top-0 bottom-0 w-1 bg-transparent hover:bg-emerald-500 cursor-ew-resize z-[60]"
+        className="absolute left-0 top-0 bottom-0 w-1 bg-transparent hover:bg-lime-500 cursor-ew-resize z-[60]"
         onMouseDown={startResizing}
       />
       
@@ -628,21 +628,21 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
          </div>
       </div>
 
-      <div className="flex border-b border-white/10 shrink-0">
+      <div className="flex border-b border-lime-900/30 shrink-0">
         <button 
-            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'gallery' ? 'text-white border-b-2 border-emerald-500' : 'text-gray-400 hover:text-white'}`}
+            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'gallery' ? 'text-white border-b-2 border-lime-500' : 'text-gray-400 hover:text-white'}`}
             onClick={() => setActiveTab('gallery')}
         >
             Gallery
         </button>
          <button 
-            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'overlays' ? 'text-white border-b-2 border-emerald-500' : 'text-gray-400 hover:text-white'}`}
+            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'overlays' ? 'text-white border-b-2 border-lime-500' : 'text-gray-400 hover:text-white'}`}
             onClick={() => setActiveTab('overlays')}
         >
             Overlays
         </button>
         <button 
-            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'properties' ? 'text-white border-b-2 border-emerald-500' : 'text-gray-400 hover:text-white'}`}
+            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'properties' ? 'text-white border-b-2 border-lime-500' : 'text-gray-400 hover:text-white'}`}
             onClick={() => setActiveTab('properties')}
         >
             Adjust
@@ -653,13 +653,13 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
         
         {activeTab === 'gallery' && (
             <div className="space-y-6">
-                <div className="bg-gradient-to-br from-emerald-900/40 to-orange-900/40 p-4 rounded-xl border border-white/10">
-                    <div className="flex items-center gap-2 mb-3 text-emerald-300">
+                <div className="bg-gradient-to-br from-green-900/40 to-lime-950/40 p-4 rounded-xl border border-lime-500/20">
+                    <div className="flex items-center gap-2 mb-3 text-lime-400">
                         <Icons.Magic className="w-4 h-4" />
                         <span className="text-xs font-bold uppercase tracking-wider">Gemini Studio</span>
                     </div>
                     <textarea 
-                        className="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-emerald-500 resize-none h-16 mb-3"
+                        className="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-lime-500 resize-none h-16 mb-3"
                         placeholder="Describe an image or text art..."
                         value={aiPrompt}
                         onChange={(e) => setAiPrompt(e.target.value)}
@@ -668,7 +668,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                         <button 
                             disabled={isGenerating || !aiPrompt}
                             onClick={() => handleAiGenerate('image')}
-                            className="flex-1 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-xs font-medium text-white transition-colors flex items-center justify-center gap-2"
+                            className="flex-1 py-2 bg-lime-800 hover:bg-lime-700 disabled:opacity-50 rounded-lg text-xs font-medium text-white transition-colors flex items-center justify-center gap-2"
                         >
                             <Icons.Image size={12} />
                             {isGenerating ? 'Gen...' : 'Gen Image'}
@@ -676,7 +676,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                         <button 
                             disabled={isGenerating || !aiPrompt}
                             onClick={() => handleAiGenerate('text')}
-                            className="flex-1 py-2 bg-orange-700 hover:bg-orange-600 disabled:opacity-50 rounded-lg text-xs font-medium text-white transition-colors flex items-center justify-center gap-2"
+                            className="flex-1 py-2 bg-green-800 hover:bg-green-700 disabled:opacity-50 rounded-lg text-xs font-medium text-white transition-colors flex items-center justify-center gap-2"
                         >
                              <Icons.Type size={12} />
                              {isGenerating ? 'Gen...' : 'Gen Text Art'}
@@ -685,7 +685,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                 </div>
 
                 <div 
-                    className="border-2 border-dashed border-white/10 rounded-xl p-6 text-center hover:border-emerald-500/50 hover:bg-white/5 transition-colors cursor-pointer"
+                    className="border-2 border-dashed border-white/10 rounded-xl p-6 text-center hover:border-lime-500/50 hover:bg-white/5 transition-colors cursor-pointer"
                     onDragOver={(e) => { e.preventDefault(); }}
                     onDrop={(e) => handleFileUpload(e, 'IMAGE')}
                 >
@@ -795,8 +795,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                         }}
                                         onContextMenu={(e) => handleGalleryContextMenu(e, item.id)}
                                     >
-                                        <div className="w-8 h-8 bg-emerald-900/50 rounded flex items-center justify-center shrink-0">
-                                            <Icons.Music size={14} className="text-emerald-500" />
+                                        <div className="w-8 h-8 bg-lime-900/50 rounded flex items-center justify-center shrink-0">
+                                            <Icons.Music size={14} className="text-lime-500" />
                                         </div>
                                         <p className="text-xs text-gray-300 truncate flex-1">{item.name}</p>
                                     </div>
@@ -815,12 +815,12 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
         {activeTab === 'overlays' && (
             <div className="space-y-6">
                  <div 
-                    className="border-2 border-dashed border-purple-500/30 bg-purple-900/10 rounded-xl p-4 text-center hover:border-purple-500/80 hover:bg-purple-500/10 transition-colors cursor-pointer"
+                    className="border-2 border-dashed border-lime-500/30 bg-lime-900/10 rounded-xl p-4 text-center hover:border-lime-500/80 hover:bg-lime-500/10 transition-colors cursor-pointer"
                     onDragOver={(e) => { e.preventDefault(); }}
                     onDrop={(e) => handleFileUpload(e, 'OVERLAY')}
                 >
-                    <Icons.Plus className="w-6 h-6 text-purple-400 mx-auto mb-2" />
-                    <p className="text-xs text-purple-200">Drag Stickers/PNGs Here</p>
+                    <Icons.Plus className="w-6 h-6 text-lime-400 mx-auto mb-2" />
+                    <p className="text-xs text-lime-200">Drag Stickers/PNGs Here</p>
                 </div>
 
                 <div>
@@ -891,7 +891,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                 ) : (
                     <>
                         {isMultiSelect && (
-                            <div className="bg-blue-900/20 border border-blue-500/50 p-2 rounded text-xs text-blue-200 text-center mb-4">
+                            <div className="bg-lime-900/20 border border-lime-500/50 p-2 rounded text-xs text-lime-200 text-center mb-4">
                                 Adjusting properties for {state.selectedIds.length} items
                             </div>
                         )}
@@ -906,7 +906,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                     type="range" min="0" max="1" step="0.1" 
                                     value={selectedElement.opacity} 
                                     onChange={(e) => updateProperty('opacity', parseFloat(e.target.value))}
-                                    className="w-full accent-emerald-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                    className="w-full accent-lime-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                                 />
                             </div>
 
@@ -916,7 +916,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                     type="range" min="0.1" max="3" step="0.1" 
                                     value={selectedElement.scale} 
                                     onChange={(e) => updateProperty('scale', parseFloat(e.target.value))}
-                                    className="w-full accent-emerald-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                    className="w-full accent-lime-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                                 />
                             </div>
 
@@ -926,7 +926,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                     type="range" min="-180" max="180" step="1" 
                                     value={selectedElement.rotation} 
                                     onChange={(e) => updateProperty('rotation', parseFloat(e.target.value))}
-                                    className="w-full accent-emerald-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                    className="w-full accent-lime-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                                 />
                             </div>
 
@@ -939,7 +939,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                         type="range" min="10" max="200" step="1" 
                                         value={selectedElement.fontSize || 40} 
                                         onChange={(e) => updateProperty('fontSize', parseFloat(e.target.value))}
-                                        className="w-full accent-purple-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                        className="w-full accent-lime-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                                     />
                                     <div className="text-right text-[10px] text-gray-400">{selectedElement.fontSize || 40}px</div>
                                 </div>
@@ -955,7 +955,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                             type="range" min="0" max="1" step="0.1" 
                                             value={selectedElement.volume} 
                                             onChange={(e) => updateProperty('volume', parseFloat(e.target.value))}
-                                            className="w-full accent-emerald-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                            className="w-full accent-lime-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                                         />
                                     </div>
 
@@ -968,7 +968,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                                 type="range" min="0.25" max="4" step="0.25" 
                                                 value={selectedElement.playbackRate || 1} 
                                                 onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
-                                                className="flex-1 accent-orange-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                                className="flex-1 accent-lime-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                                             />
                                             <span className="text-[10px] text-white w-8">{selectedElement.playbackRate || 1}x</span>
                                         </div>
@@ -1017,17 +1017,17 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
       </div>
 
-      <div className="p-4 border-t border-white/10 bg-[#121214] space-y-2 shrink-0">
+      <div className="p-4 border-t border-lime-900/30 bg-[#121214] space-y-2 shrink-0">
           <div className="flex gap-2 mb-2">
             <button 
                 onClick={() => dispatch({ type: 'SET_CANVAS_MODE', payload: 'landscape'})}
-                className={`flex-1 flex items-center justify-center p-2 rounded ${state.canvasMode === 'landscape' ? 'bg-emerald-600' : 'bg-[#27272a] text-gray-400'}`}
+                className={`flex-1 flex items-center justify-center p-2 rounded ${state.canvasMode === 'landscape' ? 'bg-lime-700' : 'bg-[#27272a] text-gray-400'}`}
             >
                 <Icons.Landscape size={14} />
             </button>
             <button 
                 onClick={() => dispatch({ type: 'SET_CANVAS_MODE', payload: 'portrait'})}
-                className={`flex-1 flex items-center justify-center p-2 rounded ${state.canvasMode === 'portrait' ? 'bg-emerald-600' : 'bg-[#27272a] text-gray-400'}`}
+                className={`flex-1 flex items-center justify-center p-2 rounded ${state.canvasMode === 'portrait' ? 'bg-lime-700' : 'bg-[#27272a] text-gray-400'}`}
             >
                 <Icons.Portrait size={14} />
             </button>
@@ -1067,7 +1067,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
               <div className="bg-[#18181b] p-6 rounded-xl border border-white/10 w-80 text-center">
                   <h3 className="text-white font-bold mb-2">Rendering Video...</h3>
                   <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden mb-2">
-                      <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${exportProgress}%` }}></div>
+                      <div className="h-full bg-lime-500 transition-all duration-300" style={{ width: `${exportProgress}%` }}></div>
                   </div>
                   <p className="text-xs text-gray-400">{exportProgress}% Complete</p>
                   <p className="text-[10px] text-gray-500 mt-2">Please do not close this window</p>
