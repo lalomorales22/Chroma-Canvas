@@ -87,9 +87,18 @@ export const ElementBlock: React.FC<ElementBlockProps> = ({
       {/* Content Preview */}
       <div className="w-full h-full relative overflow-hidden flex items-center justify-center">
          {element.type === ElementType.VIDEO && (
-            <div className="w-full h-full flex items-center justify-center bg-black/20">
-               <Icons.Move className="w-4 h-4 text-white/50" />
-               <span className="ml-2 text-xs truncate text-white/80">{element.name}</span>
+            <div className="w-full h-full relative overflow-hidden bg-black">
+               <video 
+                  src={element.src} 
+                  className="w-full h-full object-cover pointer-events-none opacity-50 group-hover:opacity-80 transition-opacity"
+                  muted
+                  onLoadedMetadata={(e) => { e.currentTarget.currentTime = element.trimStart; }}
+               />
+               <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="bg-black/50 px-2 py-1 rounded text-[10px] text-white/90 truncate max-w-[90%]">
+                      {element.name}
+                  </div>
+               </div>
             </div>
          )}
          {element.type === ElementType.IMAGE && (
@@ -141,10 +150,12 @@ export const ElementBlock: React.FC<ElementBlockProps> = ({
         </>
       )}
 
-      {/* Label Overlay */}
-      <div className="absolute top-1 left-4 text-[10px] bg-black/40 px-1 rounded text-white/90 pointer-events-none">
-        {element.name}
-      </div>
+      {/* Label Overlay (For non-videos primarily, since videos have internal label) */}
+      {element.type !== ElementType.VIDEO && (
+          <div className="absolute top-1 left-4 text-[10px] bg-black/40 px-1 rounded text-white/90 pointer-events-none">
+            {element.name}
+          </div>
+      )}
     </div>
   );
 };

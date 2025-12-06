@@ -54,11 +54,12 @@ export interface EditorState {
   currentTime: number; // Current playhead position in seconds
   isPlaying: boolean;
   zoom: number; // Pixels per second
-  selectedId: string | null;
+  selectedIds: string[]; // Changed from single ID to array
   duration: number; // Total project duration (max end time)
   canvasMode: 'landscape' | 'portrait';
   seekVersion: number; // Increments on manual seek to reset animation loop
   clipboard: CanvasElement | null;
+  view: 'EDITOR' | 'RECORDER'; // New View State
 }
 
 export interface ContextMenuState {

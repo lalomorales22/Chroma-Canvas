@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { EditorState, CanvasElement, ElementType } from '../../types';
 import { Icons } from '../Icon';
@@ -152,6 +153,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
   const resizeStartWidthRef = useRef<number | null>(null);
   const [galleryContextMenu, setGalleryContextMenu] = useState<{ x: number, y: number, id: string | null }>({ x: 0, y: 0, id: null });
   
+  // Gallery Toggles
+  const [isVideosOpen, setIsVideosOpen] = useState(true);
+  const [isImagesOpen, setIsImagesOpen] = useState(true);
+  const [isAudioOpen, setIsAudioOpen] = useState(true);
+
   // Export State
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
@@ -159,10 +165,12 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
   // Refs for export rendering
   const exportCanvasRef = useRef<HTMLCanvasElement>(null);
   const mediaElementsRef = useRef<Map<string, HTMLMediaElement>>(new Map());
-  // Cache for AudioNodes to prevent "already connected" errors on repeated exports
   const audioSourceNodeCache = useRef<WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>>(new WeakMap());
 
-  const selectedElement = state.elements.find(e => e.id === state.selectedId);
+  // Helper: Get primary selected element (last selected usually, or first)
+  const selectedElementId = state.selectedIds[0];
+  const selectedElement = state.elements.find(e => e.id === selectedElementId);
+  const isMultiSelect = state.selectedIds.length > 1;
 
   // Playback Control
   const togglePlay = () => dispatch({ type: 'TOGGLE_PLAY' });
@@ -192,28 +200,35 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
   // Property Handlers
   const updateProperty = (key: keyof CanvasElement, value: any) => {
-    if (!state.selectedId) return;
+    if (state.selectedIds.length === 0) return;
     dispatch({
-      type: 'UPDATE_ELEMENT',
-      payload: { id: state.selectedId, changes: { [key]: value } }
+      type: 'UPDATE_ELEMENTS',
+      payload: { ids: state.selectedIds, changes: { [key]: value } }
     });
   };
 
   const handleSpeedChange = (newRate: number) => {
       if (!selectedElement) return;
-      const currentRate = selectedElement.playbackRate || 1;
-      const contentLength = selectedElement.duration * currentRate;
-      const newDuration = contentLength / newRate;
-
-      dispatch({
-        type: 'UPDATE_ELEMENT',
-        payload: { 
-            id: state.selectedId, 
-            changes: { 
-                playbackRate: newRate,
-                duration: newDuration
-            } 
-        }
+      
+      // Update all selected
+      state.selectedIds.forEach(id => {
+          const el = state.elements.find(e => e.id === id);
+          if (el) {
+             const currentRate = el.playbackRate || 1;
+             const contentLength = el.duration * currentRate;
+             const newDuration = contentLength / newRate;
+             
+             dispatch({
+                type: 'UPDATE_ELEMENT',
+                payload: { 
+                    id: id, 
+                    changes: { 
+                        playbackRate: newRate,
+                        duration: newDuration
+                    } 
+                }
+             });
+          }
       });
   };
 
@@ -291,14 +306,12 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
   const handleExport = async () => {
       if (isExporting) return;
       
-      // 1. Setup & Checks
       const canvas = exportCanvasRef.current;
       if (!canvas) {
           alert("Export failed: Canvas not initialized.");
           return;
       }
       
-      // Determine valid MIME type - prioritize MP4
       const mimeTypes = [
         "video/mp4",
         "video/webm;codecs=vp9", 
@@ -314,31 +327,26 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       setIsExporting(true);
       setExportProgress(0);
       
-      // Pause playback to prevent interference
       if (state.isPlaying) dispatch({ type: 'TOGGLE_PLAY' });
 
-      // Small delay to ensure state updates
       await new Promise(r => setTimeout(r, 200));
 
-      // Store original media states to restore after export
       const originalMediaStates = new Map<string, { muted: boolean, volume: number }>();
       const gainNodes = new Map<string, GainNode>();
 
       try {
-        // 2. Preload Images
         const imageUrls = new Set(state.elements.filter(e => e.type === ElementType.IMAGE).map(e => e.src));
         const imageCache = new Map<string, HTMLImageElement>();
         
         await Promise.all(Array.from(imageUrls).map(url => new Promise<void>((resolve) => {
             if (!url) { resolve(); return; }
             const img = new Image();
-            img.crossOrigin = "anonymous"; // CRITICAL for export
+            img.crossOrigin = "anonymous"; 
             img.src = url;
             img.onload = () => { imageCache.set(url, img); resolve(); };
             img.onerror = () => { console.warn("Failed to load image for export:", url); resolve(); };
         })));
 
-        // 3. Setup Audio Mix
         const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
         const dest = audioCtx.createMediaStreamDestination();
         
@@ -347,15 +355,12 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                 const mediaEl = mediaElementsRef.current.get(el.id);
                 if (mediaEl) {
                     try {
-                        // Backup state
                         originalMediaStates.set(el.id, { muted: mediaEl.muted, volume: mediaEl.volume });
                         
-                        // Force unmute for capture - mixing handles volume
                         mediaEl.muted = false; 
                         mediaEl.volume = 1;
 
                         let source: MediaElementAudioSourceNode;
-                        // Reuse existing source node if possible
                         if (audioSourceNodeCache.current.has(mediaEl)) {
                             source = audioSourceNodeCache.current.get(mediaEl)!;
                         } else {
@@ -364,7 +369,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                         }
                         
                         const gain = audioCtx.createGain();
-                        gain.gain.value = el.volume; // Initial check
+                        gain.gain.value = el.volume; 
                         source.connect(gain);
                         gain.connect(dest);
                         
@@ -376,7 +381,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
             }
         });
 
-        // 4. Setup Recorder
         const stream = canvas.captureStream(30); 
         if (dest.stream.getAudioTracks().length > 0) {
             stream.addTrack(dest.stream.getAudioTracks()[0]);
@@ -390,7 +394,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
         };
         
         recorder.onstop = () => {
-            // Restore Media States
             originalMediaStates.forEach((val, id) => {
                 const m = mediaElementsRef.current.get(id);
                 if(m) {
@@ -403,7 +406,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            // Force mp4 extension if mime type is mp4, otherwise keep webm/original
             const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
             a.download = `chromacanvas_export_${Date.now()}.${ext}`;
             a.click();
@@ -415,7 +417,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
         recorder.start();
 
-        // 5. Render Loop
         const duration = Math.max(1, state.duration); 
         const ctx = canvas.getContext('2d', { alpha: false }); 
         if (!ctx) throw new Error("Could not get 2D context");
@@ -436,7 +437,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
                 setExportProgress(Math.min(100, Math.round((elapsed / duration) * 100)));
                 
-                // Clear Canvas
                 ctx.fillStyle = '#000';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 
@@ -445,7 +445,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                   .sort((a, b) => a.trackId - b.trackId);
 
                 for (const el of activeElements) {
-                     // Fade Logic
                      let fadeMultiplier = 1;
                      const clipTime = elapsed - el.startTime;
                      if (el.fadeIn > 0 && clipTime < el.fadeIn) {
@@ -454,7 +453,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                          fadeMultiplier = Math.max(0, (el.duration - clipTime) / el.fadeOut);
                      }
                      
-                     // Update Audio Gain Dynamically
                      const gainNode = gainNodes.get(el.id);
                      if (gainNode) {
                          gainNode.gain.value = el.volume * fadeMultiplier;
@@ -506,7 +504,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                      }
                      ctx.restore();
                      
-                     // Sync Audio Elements specifically (since they aren't drawn)
                      if (el.type === ElementType.AUDIO) {
                         const audioEl = mediaElementsRef.current.get(el.id);
                         if (audioEl) {
@@ -534,7 +531,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
           console.error("Fatal Export Error:", error);
           alert("Export failed due to an unexpected error.");
           setIsExporting(false);
-          // Restore on error
           originalMediaStates.forEach((val, id) => {
                 const m = mediaElementsRef.current.get(id);
                 if(m) { m.muted = val.muted; m.volume = val.volume; }
@@ -562,13 +558,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
         className="bg-[#18181b] border-l border-white/10 flex flex-col h-full z-50 shadow-xl relative"
         style={{ width: width }}
     >
-      {/* Resizer Handle */}
       <div 
-        className="absolute left-0 top-0 bottom-0 w-1 bg-transparent hover:bg-blue-500 cursor-ew-resize z-[60]"
+        className="absolute left-0 top-0 bottom-0 w-1 bg-transparent hover:bg-emerald-500 cursor-ew-resize z-[60]"
         onMouseDown={startResizing}
       />
       
-      {/* 1. Preview Player */}
       <div className="aspect-video bg-black relative flex items-center justify-center overflow-hidden border-b border-white/10 shrink-0">
          <div 
             className="w-full h-full relative"
@@ -578,12 +572,10 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                 aspectRatio: state.canvasMode === 'portrait' ? '9/16' : '16/9'
             }}
          >
-             {/* DOM Renderer for Editor */}
              {state.elements
                 .sort((a, b) => a.trackId - b.trackId)
                 .map(el => (
                     <React.Fragment key={el.id}>
-                        {/* Always Render Media Layers so they are mounted for export, handle visibility internally */}
                         {(el.type === ElementType.VIDEO || el.type === ElementType.AUDIO) ? (
                             <MediaLayer 
                                 element={el} 
@@ -596,7 +588,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                 }}
                             />
                         ) : (
-                            /* Conditionally Render Images/Text based on time to save DOM weight */
                             (state.currentTime >= el.startTime && state.currentTime < el.startTime + el.duration) && (
                                 <div 
                                     className="absolute inset-0 flex items-center justify-center transition-all"
@@ -637,42 +628,38 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
          </div>
       </div>
 
-      {/* 2. Tabs */}
       <div className="flex border-b border-white/10 shrink-0">
         <button 
-            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'gallery' ? 'text-white border-b-2 border-blue-500' : 'text-gray-400 hover:text-white'}`}
+            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'gallery' ? 'text-white border-b-2 border-emerald-500' : 'text-gray-400 hover:text-white'}`}
             onClick={() => setActiveTab('gallery')}
         >
             Gallery
         </button>
          <button 
-            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'overlays' ? 'text-white border-b-2 border-blue-500' : 'text-gray-400 hover:text-white'}`}
+            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'overlays' ? 'text-white border-b-2 border-emerald-500' : 'text-gray-400 hover:text-white'}`}
             onClick={() => setActiveTab('overlays')}
         >
             Overlays
         </button>
         <button 
-            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'properties' ? 'text-white border-b-2 border-blue-500' : 'text-gray-400 hover:text-white'}`}
+            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'properties' ? 'text-white border-b-2 border-emerald-500' : 'text-gray-400 hover:text-white'}`}
             onClick={() => setActiveTab('properties')}
         >
             Adjust
         </button>
       </div>
 
-      {/* 3. Panel Content */}
       <div className="flex-1 overflow-y-auto p-4 custom-scrollbar relative">
         
         {activeTab === 'gallery' && (
             <div className="space-y-6">
-                
-                {/* AI Generator */}
-                <div className="bg-gradient-to-br from-blue-900/40 to-purple-900/40 p-4 rounded-xl border border-white/10">
-                    <div className="flex items-center gap-2 mb-3 text-blue-300">
+                <div className="bg-gradient-to-br from-emerald-900/40 to-orange-900/40 p-4 rounded-xl border border-white/10">
+                    <div className="flex items-center gap-2 mb-3 text-emerald-300">
                         <Icons.Magic className="w-4 h-4" />
                         <span className="text-xs font-bold uppercase tracking-wider">Gemini Studio</span>
                     </div>
                     <textarea 
-                        className="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-blue-500 resize-none h-16 mb-3"
+                        className="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-emerald-500 resize-none h-16 mb-3"
                         placeholder="Describe an image or text art..."
                         value={aiPrompt}
                         onChange={(e) => setAiPrompt(e.target.value)}
@@ -681,7 +668,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                         <button 
                             disabled={isGenerating || !aiPrompt}
                             onClick={() => handleAiGenerate('image')}
-                            className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-xs font-medium text-white transition-colors flex items-center justify-center gap-2"
+                            className="flex-1 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-xs font-medium text-white transition-colors flex items-center justify-center gap-2"
                         >
                             <Icons.Image size={12} />
                             {isGenerating ? 'Gen...' : 'Gen Image'}
@@ -689,7 +676,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                         <button 
                             disabled={isGenerating || !aiPrompt}
                             onClick={() => handleAiGenerate('text')}
-                            className="flex-1 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-lg text-xs font-medium text-white transition-colors flex items-center justify-center gap-2"
+                            className="flex-1 py-2 bg-orange-700 hover:bg-orange-600 disabled:opacity-50 rounded-lg text-xs font-medium text-white transition-colors flex items-center justify-center gap-2"
                         >
                              <Icons.Type size={12} />
                              {isGenerating ? 'Gen...' : 'Gen Text Art'}
@@ -697,9 +684,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                     </div>
                 </div>
 
-                {/* Drop Zone */}
                 <div 
-                    className="border-2 border-dashed border-white/10 rounded-xl p-6 text-center hover:border-blue-500/50 hover:bg-white/5 transition-colors cursor-pointer"
+                    className="border-2 border-dashed border-white/10 rounded-xl p-6 text-center hover:border-emerald-500/50 hover:bg-white/5 transition-colors cursor-pointer"
                     onDragOver={(e) => { e.preventDefault(); }}
                     onDrop={(e) => handleFileUpload(e, 'IMAGE')}
                 >
@@ -707,99 +693,119 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                     <p className="text-xs text-gray-400">Drag & Drop media here<br/>to add to Gallery</p>
                 </div>
 
-                {/* Library Lists */}
                 <div className="space-y-4">
-                    {/* Videos */}
+                    {/* Videos Section */}
                     <div>
-                        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                            <Icons.Play size={10} /> Videos
-                        </h3>
-                        <div className="grid grid-cols-2 gap-2">
-                            {getFilteredLibrary('VIDEO').map(item => (
-                                <div 
-                                    key={item.id}
-                                    className="bg-[#27272a] p-2 rounded cursor-grab hover:bg-[#3f3f46] transition-colors group relative"
-                                    draggable
-                                    onDragStart={(e) => {
-                                        e.dataTransfer.setData('type', item.type);
-                                        e.dataTransfer.setData('src', item.src);
-                                        e.dataTransfer.setData('name', item.name);
-                                        if (item.duration) e.dataTransfer.setData('duration', item.duration.toString());
-                                    }}
-                                    onContextMenu={(e) => handleGalleryContextMenu(e, item.id)}
-                                >
-                                    <div className="aspect-video bg-black mb-1 rounded overflow-hidden relative">
-                                        <video src={item.src} className="w-full h-full object-cover opacity-60 group-hover:opacity-100" />
+                        <button 
+                            className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-2"
+                            onClick={() => setIsVideosOpen(!isVideosOpen)}
+                        >
+                            <span className="flex items-center gap-2"><Icons.Play size={10} /> Videos</span>
+                            <span className="text-gray-600">{isVideosOpen ? '▼' : '▶'}</span>
+                        </button>
+                        
+                        {isVideosOpen && (
+                            <div className="grid grid-cols-2 gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                                {getFilteredLibrary('VIDEO').map(item => (
+                                    <div 
+                                        key={item.id}
+                                        className="bg-[#27272a] p-2 rounded cursor-grab hover:bg-[#3f3f46] transition-colors group relative"
+                                        draggable
+                                        onDragStart={(e) => {
+                                            e.dataTransfer.setData('type', item.type);
+                                            e.dataTransfer.setData('src', item.src);
+                                            e.dataTransfer.setData('name', item.name);
+                                            if (item.duration) e.dataTransfer.setData('duration', item.duration.toString());
+                                        }}
+                                        onContextMenu={(e) => handleGalleryContextMenu(e, item.id)}
+                                    >
+                                        <div className="aspect-video bg-black mb-1 rounded overflow-hidden relative">
+                                            <video src={item.src} className="w-full h-full object-cover opacity-60 group-hover:opacity-100" />
+                                        </div>
+                                        <p className="text-[10px] text-gray-300 truncate">{item.name}</p>
                                     </div>
-                                    <p className="text-[10px] text-gray-300 truncate">{item.name}</p>
-                                </div>
-                            ))}
-                            {getFilteredLibrary('VIDEO').length === 0 && (
-                                <div className="col-span-2 text-[10px] text-gray-600 italic text-center py-2">No videos yet</div>
-                            )}
-                        </div>
+                                ))}
+                                {getFilteredLibrary('VIDEO').length === 0 && (
+                                    <div className="col-span-2 text-[10px] text-gray-600 italic text-center py-2">No videos yet</div>
+                                )}
+                            </div>
+                        )}
                     </div>
 
-                    {/* Images */}
+                    {/* Images Section */}
                     <div>
-                        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                            <Icons.Image size={10} /> Images
-                        </h3>
-                        <div className="grid grid-cols-2 gap-2">
-                            {getFilteredLibrary('IMAGE').map(item => (
-                                <div 
-                                    key={item.id}
-                                    className="bg-[#27272a] p-2 rounded cursor-grab hover:bg-[#3f3f46] transition-colors group relative"
-                                    draggable
-                                    onDragStart={(e) => {
-                                        e.dataTransfer.setData('type', item.type);
-                                        e.dataTransfer.setData('src', item.src);
-                                        e.dataTransfer.setData('name', item.name);
-                                        if (item.duration) e.dataTransfer.setData('duration', item.duration.toString());
-                                    }}
-                                    onContextMenu={(e) => handleGalleryContextMenu(e, item.id)}
-                                >
-                                    <div className="aspect-video bg-black mb-1 rounded overflow-hidden relative">
-                                        <img src={item.src} className="w-full h-full object-cover opacity-80 group-hover:opacity-100" />
+                        <button 
+                            className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-2"
+                            onClick={() => setIsImagesOpen(!isImagesOpen)}
+                        >
+                            <span className="flex items-center gap-2"><Icons.Image size={10} /> Images</span>
+                            <span className="text-gray-600">{isImagesOpen ? '▼' : '▶'}</span>
+                        </button>
+                        
+                        {isImagesOpen && (
+                            <div className="grid grid-cols-2 gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                                {getFilteredLibrary('IMAGE').map(item => (
+                                    <div 
+                                        key={item.id}
+                                        className="bg-[#27272a] p-2 rounded cursor-grab hover:bg-[#3f3f46] transition-colors group relative"
+                                        draggable
+                                        onDragStart={(e) => {
+                                            e.dataTransfer.setData('type', item.type);
+                                            e.dataTransfer.setData('src', item.src);
+                                            e.dataTransfer.setData('name', item.name);
+                                            if (item.duration) e.dataTransfer.setData('duration', item.duration.toString());
+                                        }}
+                                        onContextMenu={(e) => handleGalleryContextMenu(e, item.id)}
+                                    >
+                                        <div className="aspect-video bg-black mb-1 rounded overflow-hidden relative">
+                                            <img src={item.src} className="w-full h-full object-cover opacity-80 group-hover:opacity-100" />
+                                        </div>
+                                        <p className="text-[10px] text-gray-300 truncate">{item.name}</p>
                                     </div>
-                                    <p className="text-[10px] text-gray-300 truncate">{item.name}</p>
-                                </div>
-                            ))}
-                            {getFilteredLibrary('IMAGE').length === 0 && (
-                                <div className="col-span-2 text-[10px] text-gray-600 italic text-center py-2">No images yet</div>
-                            )}
-                        </div>
+                                ))}
+                                {getFilteredLibrary('IMAGE').length === 0 && (
+                                    <div className="col-span-2 text-[10px] text-gray-600 italic text-center py-2">No images yet</div>
+                                )}
+                            </div>
+                        )}
                     </div>
 
-                    {/* Audio */}
+                    {/* Audio Section */}
                     <div>
-                        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                            <Icons.Music size={10} /> Audio
-                        </h3>
-                        <div className="space-y-2">
-                            {getFilteredLibrary('AUDIO').map(item => (
-                                <div 
-                                    key={item.id}
-                                    className="bg-[#27272a] p-2 rounded cursor-grab hover:bg-[#3f3f46] transition-colors flex items-center gap-3 relative"
-                                    draggable
-                                    onDragStart={(e) => {
-                                        e.dataTransfer.setData('type', item.type);
-                                        e.dataTransfer.setData('src', item.src);
-                                        e.dataTransfer.setData('name', item.name);
-                                        if (item.duration) e.dataTransfer.setData('duration', item.duration.toString());
-                                    }}
-                                    onContextMenu={(e) => handleGalleryContextMenu(e, item.id)}
-                                >
-                                    <div className="w-8 h-8 bg-emerald-900/50 rounded flex items-center justify-center shrink-0">
-                                        <Icons.Music size={14} className="text-emerald-500" />
+                        <button 
+                            className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-2"
+                            onClick={() => setIsAudioOpen(!isAudioOpen)}
+                        >
+                            <span className="flex items-center gap-2"><Icons.Music size={10} /> Audio</span>
+                            <span className="text-gray-600">{isAudioOpen ? '▼' : '▶'}</span>
+                        </button>
+
+                        {isAudioOpen && (
+                            <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                                {getFilteredLibrary('AUDIO').map(item => (
+                                    <div 
+                                        key={item.id}
+                                        className="bg-[#27272a] p-2 rounded cursor-grab hover:bg-[#3f3f46] transition-colors flex items-center gap-3 relative"
+                                        draggable
+                                        onDragStart={(e) => {
+                                            e.dataTransfer.setData('type', item.type);
+                                            e.dataTransfer.setData('src', item.src);
+                                            e.dataTransfer.setData('name', item.name);
+                                            if (item.duration) e.dataTransfer.setData('duration', item.duration.toString());
+                                        }}
+                                        onContextMenu={(e) => handleGalleryContextMenu(e, item.id)}
+                                    >
+                                        <div className="w-8 h-8 bg-emerald-900/50 rounded flex items-center justify-center shrink-0">
+                                            <Icons.Music size={14} className="text-emerald-500" />
+                                        </div>
+                                        <p className="text-xs text-gray-300 truncate flex-1">{item.name}</p>
                                     </div>
-                                    <p className="text-xs text-gray-300 truncate flex-1">{item.name}</p>
-                                </div>
-                            ))}
-                            {getFilteredLibrary('AUDIO').length === 0 && (
-                                <div className="text-[10px] text-gray-600 italic text-center py-2">No audio tracks yet</div>
-                            )}
-                        </div>
+                                ))}
+                                {getFilteredLibrary('AUDIO').length === 0 && (
+                                    <div className="text-[10px] text-gray-600 italic text-center py-2">No audio tracks yet</div>
+                                )}
+                            </div>
+                        )}
                     </div>
 
                 </div>
@@ -808,8 +814,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
         {activeTab === 'overlays' && (
             <div className="space-y-6">
-                
-                {/* Overlay Drop Zone */}
                  <div 
                     className="border-2 border-dashed border-purple-500/30 bg-purple-900/10 rounded-xl p-4 text-center hover:border-purple-500/80 hover:bg-purple-500/10 transition-colors cursor-pointer"
                     onDragOver={(e) => { e.preventDefault(); }}
@@ -819,7 +823,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                     <p className="text-xs text-purple-200">Drag Stickers/PNGs Here</p>
                 </div>
 
-                {/* Emojis */}
                 <div>
                      <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Emojis & Stickers</h3>
                      <div className="grid grid-cols-4 gap-2">
@@ -850,7 +853,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                      </div>
                 </div>
 
-                {/* User Overlays */}
                 <div>
                     <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 mt-6">My Overlays</h3>
                     <div className="grid grid-cols-3 gap-2">
@@ -888,19 +890,23 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                     </div>
                 ) : (
                     <>
+                        {isMultiSelect && (
+                            <div className="bg-blue-900/20 border border-blue-500/50 p-2 rounded text-xs text-blue-200 text-center mb-4">
+                                Adjusting properties for {state.selectedIds.length} items
+                            </div>
+                        )}
                         <div className="space-y-4">
-                            <h3 className="text-sm font-semibold text-white border-b border-white/10 pb-2">
-                                {selectedElement.name}
+                            <h3 className="text-sm font-semibold text-white border-b border-white/10 pb-2 truncate">
+                                {isMultiSelect ? 'Multiple Selection' : selectedElement.name}
                             </h3>
                             
-                            {/* Common Props */}
                             <div className="space-y-1">
                                 <label className="text-[10px] text-gray-400 uppercase">Opacity</label>
                                 <input 
                                     type="range" min="0" max="1" step="0.1" 
                                     value={selectedElement.opacity} 
                                     onChange={(e) => updateProperty('opacity', parseFloat(e.target.value))}
-                                    className="w-full accent-blue-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                    className="w-full accent-emerald-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                                 />
                             </div>
 
@@ -910,7 +916,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                     type="range" min="0.1" max="3" step="0.1" 
                                     value={selectedElement.scale} 
                                     onChange={(e) => updateProperty('scale', parseFloat(e.target.value))}
-                                    className="w-full accent-blue-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                    className="w-full accent-emerald-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                                 />
                             </div>
 
@@ -920,11 +926,10 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                     type="range" min="-180" max="180" step="1" 
                                     value={selectedElement.rotation} 
                                     onChange={(e) => updateProperty('rotation', parseFloat(e.target.value))}
-                                    className="w-full accent-blue-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                    className="w-full accent-emerald-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                                 />
                             </div>
 
-                            {/* Text Specific */}
                             {selectedElement.type === ElementType.TEXT && (
                                 <div className="space-y-1 pt-2 border-t border-white/10">
                                     <label className="text-[10px] text-gray-400 uppercase flex items-center gap-2">
@@ -940,7 +945,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                 </div>
                             )}
 
-                            {/* Video/Audio Specific */}
                             {(selectedElement.type === ElementType.VIDEO || selectedElement.type === ElementType.AUDIO) && (
                                 <div className="space-y-3 pt-2 border-t border-white/10">
                                     <div className="space-y-1">
@@ -955,7 +959,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                         />
                                     </div>
 
-                                    {/* Speed Multiplier */}
                                     <div className="space-y-1">
                                         <label className="text-[10px] text-gray-400 uppercase flex items-center gap-2">
                                             <Icons.Move size={12} /> Speed (Playback Rate)
@@ -971,7 +974,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                         </div>
                                     </div>
 
-                                    {/* Fades */}
                                     <div className="grid grid-cols-2 gap-2">
                                         <div className="space-y-1">
                                             <label className="text-[10px] text-gray-400 uppercase">Fade In (s)</label>
@@ -1000,7 +1002,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                     <button 
                                         className="w-full py-2 bg-[#27272a] hover:bg-[#3f3f46] text-xs text-white rounded border border-white/10 flex items-center justify-center gap-2"
                                         onClick={() => {
-                                            dispatch({ type: 'EXTRACT_AUDIO', payload: selectedElement.id });
+                                            dispatch({ type: 'EXTRACT_AUDIO', payload: null });
                                         }}
                                     >
                                         <Icons.Music size={12} /> Extract Audio (Mutes Video)
@@ -1015,18 +1017,17 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
       </div>
 
-      {/* 4. Export & Settings Footer */}
       <div className="p-4 border-t border-white/10 bg-[#121214] space-y-2 shrink-0">
           <div className="flex gap-2 mb-2">
             <button 
                 onClick={() => dispatch({ type: 'SET_CANVAS_MODE', payload: 'landscape'})}
-                className={`flex-1 flex items-center justify-center p-2 rounded ${state.canvasMode === 'landscape' ? 'bg-blue-600' : 'bg-[#27272a] text-gray-400'}`}
+                className={`flex-1 flex items-center justify-center p-2 rounded ${state.canvasMode === 'landscape' ? 'bg-emerald-600' : 'bg-[#27272a] text-gray-400'}`}
             >
                 <Icons.Landscape size={14} />
             </button>
             <button 
                 onClick={() => dispatch({ type: 'SET_CANVAS_MODE', payload: 'portrait'})}
-                className={`flex-1 flex items-center justify-center p-2 rounded ${state.canvasMode === 'portrait' ? 'bg-blue-600' : 'bg-[#27272a] text-gray-400'}`}
+                className={`flex-1 flex items-center justify-center p-2 rounded ${state.canvasMode === 'portrait' ? 'bg-emerald-600' : 'bg-[#27272a] text-gray-400'}`}
             >
                 <Icons.Portrait size={14} />
             </button>
@@ -1040,7 +1041,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
           </button>
       </div>
 
-      {/* Gallery Context Menu */}
       {galleryContextMenu.id && (
           <div 
              className="fixed z-[100] bg-[#27272a] border border-white/10 shadow-xl rounded py-1 w-32"
@@ -1055,7 +1055,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
           </div>
       )}
 
-      {/* Hidden Canvas for Export: Fixed positioning offscreen so browser still renders it */}
       <canvas 
           ref={exportCanvasRef} 
           width={state.canvasMode === 'portrait' ? 720 : 1280} 
@@ -1063,13 +1062,12 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
           className="fixed top-0 left-0 -z-50 opacity-0 pointer-events-none" 
       />
 
-      {/* Export Modal */}
       {isExporting && (
           <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center">
               <div className="bg-[#18181b] p-6 rounded-xl border border-white/10 w-80 text-center">
                   <h3 className="text-white font-bold mb-2">Rendering Video...</h3>
                   <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden mb-2">
-                      <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${exportProgress}%` }}></div>
+                      <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${exportProgress}%` }}></div>
                   </div>
                   <p className="text-xs text-gray-400">{exportProgress}% Complete</p>
                   <p className="text-[10px] text-gray-500 mt-2">Please do not close this window</p>

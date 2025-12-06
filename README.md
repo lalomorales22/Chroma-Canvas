@@ -1,89 +1,96 @@
 # ChromaCanvas 🎨🎬
 
-> A next-generation, AI-powered infinite canvas video editor.
+> A next-generation, AI-powered infinite canvas video editor & recording studio.
 
-ChromaCanvas is a modern web-based video editing application that breaks away from traditional linear timelines. It offers a spatial "infinite canvas" approach where time flows left-to-right, but creativity knows no bounds. Built with React, Tailwind CSS, and Google Gemini AI.
+ChromaCanvas is a modern web-based video production suite. It combines a non-linear, spatial "infinite canvas" editor with a full-featured multi-source recording studio. Built with React 19, Tailwind CSS, and Google Gemini AI.
 
-## ✨ Features
+## ✨ Key Features
 
-- **Infinite Canvas Timeline**: Drag, drop, and arrange clips on a spatial timeline.
-- **Multi-Track Editing**: Layer videos, images, audio, and text freely.
-- **AI-Powered Generation**:
-  - Generate images and backgrounds using Google Gemini 2.5 Flash Image.
-  - Create unique text art and typography stickers.
-- **Advanced Editing Tools**:
-  - **Split Clips**: Precise cutting of video and audio segments.
-  - **Extract Audio**: Separate audio tracks from video files.
-  - **Speed Control**: Adjust playback rate (0.25x - 4x) for slow-mo or timelapse effects.
-  - **Fades**: Smooth audio/video fade-in and fade-out controls.
-  - **Transform**: Scale, rotate, and adjust opacity of any element.
-- **Media Support**:
-  - Drag & Drop import for Videos (MP4, WebM), Audio (MP3, WAV), and Images.
-  - Built-in Gallery and Overlay/Sticker library.
-- **Flexible Export**:
-  - Render projects to MP4 (or WebM fallback).
-  - Support for **Landscape (16:9)** and **Portrait (9:16)** aspect ratios.
+### 🎬 Chroma Canvas (The Editor)
+*   **Infinite Spatial Timeline**: Drag, drop, and overlap clips freely. Time flows left-to-right, but layers are limitless.
+*   **Magnetic Snapping**: Clips automatically snap to the start/end of other elements for precise alignment.
+*   **Multi-Track Mixing**: Layer Videos, Images, Audio, and Text.
+*   **AI Asset Generation** (Powered by Gemini 2.5):
+    *   **Gen Image**: Create custom assets/backgrounds from text prompts.
+    *   **Gen Text Art**: Generate unique typography stickers.
+*   **Advanced Editing**:
+    *   **Split Clip**: Precision cutting at the playhead.
+    *   **Extract Audio**: Separate audio tracks from video files.
+    *   **Speed Control**: 0.25x to 4x playback rates.
+    *   **Fades & Volume**: Smooth fade-in/out and opacity controls.
+    *   **Transform**: Rotate, Scale, and Position any element.
+    *   **Multi-Select**: Drag to highlight multiple clips for bulk moving or deleting.
+*   **Video Previews**: Real-time video thumbnails directly on the timeline blocks.
+*   **Export**: Client-side rendering to MP4 (or WebM) with full audio mixing.
+
+### 🔴 Recorder Studio
+A powerful environment to capture raw footage before editing.
+*   **Multi-Source Recording**: Record **Screen Share**, **Webcams**, **Microphones**, and **Whiteboards** simultaneously.
+*   **Interactive Whiteboard**:
+    *   Draw live while recording.
+    *   Tools: Brush, Eraser, Color Picker, Undo/Redo.
+    *   **Context Menu Toggle**: Right-click to switch between "Moving Window" and "Drawing Mode".
+*   **Green Screen (Chroma Key)**: Real-time background removal filter for webcams.
+*   **Device Switching**: Hot-swap cameras and microphones on the fly via right-click.
+*   **Fit-to-Source**: Auto-resize windows to match the aspect ratio of the input device (e.g., vertical phone camera).
+*   **Auto-Save**: All recordings are automatically saved to the Editor Gallery.
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-
-- Node.js (v18 or higher recommended)
-- npm or yarn
-- A Google Gemini API Key (for AI features)
+*   Node.js (v18+)
+*   Google Gemini API Key (for AI features)
 
 ### Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/lalomorales22/chroma-canvas-video-editor.git
-   ```
+1.  **Clone the repository**
+    ```bash
+    git clone https://github.com/lalomorales22/chroma-canvas-video-editor.git
+    cd chroma-canvas-video-editor
+    ```
 
-2. **Navigate to the project directory**
-   ```bash
-   cd chroma-canvas-video-editor
-   ```
+2.  **Install dependencies**
+    ```bash
+    npm install
+    # or
+    yarn install
+    ```
 
-3. **Install dependencies**
-   ```bash
-   npm install
-   # or
-   yarn install
-   ```
+3.  **Set up Environment Variables**
+    Create a `.env` file in the root directory:
+    ```env
+    API_KEY=your_google_gemini_api_key_here
+    ```
 
-4. **Set up Environment Variables**
-   Create a `.env` file in the root directory and add your Google Gemini API key:
-   ```env
-   API_KEY=your_google_gemini_api_key_here
-   ```
+4.  **Run the app**
+    ```bash
+    npm start
+    ```
+    Open [http://localhost:3000](http://localhost:3000).
 
-5. **Run the development server**
-   ```bash
-   npm start
-   # or
-   yarn start
-   ```
+## 🎮 Controls & Shortcuts
 
-   Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
-
-## 🎮 How to Use
-
-1.  **Import Media**: Drag files from your computer directly onto the canvas or into the "Gallery" drop zone in the sidebar.
-2.  **Arrange**: Move clips around the timeline. Vertical position determines the layer order (bottom is background, top is foreground).
-3.  **Edit**:
-    - **Trim**: Hover over the edges of a clip to drag and trim the start or end.
-    - **Split**: Right-click a clip and select "Split Clip" to cut it at the playhead.
-    - **Properties**: Click a clip to open the "Adjust" panel in the sidebar to change volume, speed, opacity, etc.
-4.  **AI Gen**: Go to the Gallery tab, type a prompt, and click "Gen Image" or "Gen Text Art" to create assets on the fly.
-5.  **Export**: Click the "Export MP4" button in the sidebar to render your masterpiece.
+| Action | Shortcut / Control |
+| :--- | :--- |
+| **Play / Pause** | `Spacebar` |
+| **Delete Item** | `Backspace` or `Delete` |
+| **Zoom In/Out** | `Ctrl` + `Scroll` / `Cmd` + `Scroll` |
+| **Pan Timeline** | `Scroll` (Vertical & Horizontal) |
+| **Multi-Select** | Click & Drag on empty canvas space |
+| **Context Menu** | `Right-Click` on any item or canvas |
 
 ## 🛠️ Tech Stack
 
-- **Frontend**: React 19, TypeScript
-- **Styling**: Tailwind CSS
-- **AI**: Google GenAI SDK (Gemini 2.5 Flash)
-- **Icons**: Lucide React
+*   **Framework**: React 19 (RC)
+*   **Language**: TypeScript
+*   **Styling**: Tailwind CSS
+*   **AI**: Google GenAI SDK (`@google/genai`)
+*   **Media**: Native `MediaStream`, `MediaRecorder`, and `Web Audio API`
+*   **Icons**: Lucide React
 
 ---
+
+### 🟢 Theme
+The app features a modern **Emerald & Dark Mode** aesthetic, designed for focus and creativity.
 
 Built with ❤️ by Lalo Morales.
