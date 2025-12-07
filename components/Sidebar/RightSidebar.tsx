@@ -12,6 +12,12 @@ interface RightSidebarProps {
   setWidth: (w: number) => void;
 }
 
+const TRANSITIONS = [
+    { name: "Fade Black", src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", color: "bg-black" },
+    { name: "Fade White", src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=", color: "bg-white" },
+    { name: "Glitch", src: "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3AyNXh6Y2F4Y3E4Y3E4Y3E4Y3E4Y3E4Y3E4Y3E4Y3E4YyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/L2r5pZc4X9lQ/giphy.gif", color: "bg-purple-900" } 
+];
+
 const getMediaDuration = (src: string, type: ElementType): Promise<number> => {
     return new Promise((resolve) => {
       if (type === ElementType.IMAGE || type === ElementType.TEXT) {
@@ -157,9 +163,15 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
   const [isVideosOpen, setIsVideosOpen] = useState(true);
   const [isImagesOpen, setIsImagesOpen] = useState(true);
   const [isAudioOpen, setIsAudioOpen] = useState(true);
+  
+  // Overlay Toggles
+  const [isEmojisOpen, setIsEmojisOpen] = useState(true);
+  const [isGifsOpen, setIsGifsOpen] = useState(true);
+  const [isTransitionsOpen, setIsTransitionsOpen] = useState(true);
 
   // File Inputs
   const overlayInputRef = useRef<HTMLInputElement>(null);
+  const gifInputRef = useRef<HTMLInputElement>(null);
 
   // Export State
   const [isExporting, setIsExporting] = useState(false);
@@ -366,7 +378,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
   };
 
   // File Upload Handler
-  const handleFileUpload = async (e: React.DragEvent<HTMLDivElement> | React.ChangeEvent<HTMLInputElement>, targetCategory: 'VIDEO' | 'IMAGE' | 'AUDIO' | 'OVERLAY' = 'IMAGE') => {
+  const handleFileUpload = async (e: React.DragEvent<HTMLDivElement> | React.ChangeEvent<HTMLInputElement>, targetCategory: 'VIDEO' | 'IMAGE' | 'AUDIO' | 'OVERLAY' | 'GIF' = 'IMAGE') => {
       if (e.type === 'drop') {
           e.preventDefault();
           e.stopPropagation();
@@ -388,8 +400,12 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
           let type: ElementType = ElementType.IMAGE;
           let category = targetCategory;
 
-          // If strictly uploading to Overlays, treat as Image type but Overlay category
-          if (targetCategory === 'OVERLAY') {
+          // If GIF, force category
+          if (file.type === 'image/gif') {
+              type = ElementType.IMAGE;
+              category = 'GIF';
+          }
+          else if (targetCategory === 'OVERLAY' || targetCategory === 'GIF') {
                type = ElementType.IMAGE;
           } else {
               if (file.type.startsWith('video/')) {
@@ -910,70 +926,147 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
         
         {activeTab === 'overlays' && (
              <div className="space-y-6">
-                 <input 
-                    type="file" 
-                    ref={overlayInputRef} 
-                    className="hidden" 
-                    accept="image/*"
-                    multiple
-                    onChange={(e) => handleFileUpload(e, 'OVERLAY')}
-                 />
-                 <div 
-                    className="border-2 border-dashed border-lime-500/30 bg-lime-900/10 rounded-xl p-4 text-center hover:border-lime-500/80 hover:bg-lime-500/10 transition-colors cursor-pointer"
-                    onClick={() => overlayInputRef.current?.click()}
-                    onDragOver={(e) => { e.preventDefault(); }}
-                    onDrop={(e) => handleFileUpload(e, 'OVERLAY')}
-                >
-                    <Icons.Plus className="w-6 h-6 text-lime-400 mx-auto mb-2" />
-                    <p className="text-xs text-lime-200">Drag or Click to Add PNGs</p>
-                    <p className="text-[9px] text-lime-200/50 mt-1">(Supports Paste from Clipboard)</p>
-                </div>
-
-                {/* Overlays List in Overlay Tab */}
-                <div className="grid grid-cols-3 gap-2">
-                    {getFilteredLibrary('OVERLAY').map(item => (
-                        <div key={item.id} draggable onDragStart={(e) => { e.dataTransfer.setData('type', item.type); e.dataTransfer.setData('src', item.src); e.dataTransfer.setData('name', item.name); if(item.duration) e.dataTransfer.setData('duration', item.duration.toString())}} className="aspect-square bg-zinc-900 border border-zinc-800 rounded p-1 cursor-grab hover:border-lime-500 relative group">
-                            <img src={item.src} className="w-full h-full object-contain" />
-                             <button 
-                                onClick={(e) => handleGalleryContextMenu(e, item.id)}
-                                className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-400 bg-black/50 rounded-full p-0.5"
+                 {/* 1. Emojis & PNGs */}
+                 <div>
+                    <button className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-3" onClick={() => setIsEmojisOpen(!isEmojisOpen)}>
+                         <span>Emojis & PNGs</span>
+                         <span className="text-gray-600">{isEmojisOpen ? '▼' : '▶'}</span>
+                    </button>
+                    {isEmojisOpen && (
+                        <div className="space-y-3">
+                            <input 
+                                type="file" 
+                                ref={overlayInputRef} 
+                                className="hidden" 
+                                accept="image/*"
+                                multiple
+                                onChange={(e) => handleFileUpload(e, 'OVERLAY')}
+                            />
+                            <div 
+                                className="border-2 border-dashed border-lime-500/30 bg-lime-900/10 rounded-xl p-3 text-center hover:border-lime-500/80 hover:bg-lime-500/10 transition-colors cursor-pointer"
+                                onClick={() => overlayInputRef.current?.click()}
+                                onDragOver={(e) => { e.preventDefault(); }}
+                                onDrop={(e) => handleFileUpload(e, 'OVERLAY')}
                             >
-                                <Icons.X size={10} />
-                            </button>
-                        </div>
-                    ))}
-                </div>
+                                <Icons.Plus className="w-5 h-5 text-lime-400 mx-auto mb-1" />
+                                <p className="text-[10px] text-lime-200">Drag or Click to Add PNGs</p>
+                            </div>
 
-                <div>
-                     <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Emojis & Stickers</h3>
-                     <div className="grid grid-cols-4 gap-2">
-                         {DEFAULT_EMOJIS.map((emoji, idx) => (
-                             <button 
-                                key={idx}
-                                className="aspect-square bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded flex items-center justify-center text-2xl transition-colors"
-                                onClick={() => {
-                                    const newEl = {
-                                        id: Math.random().toString(),
-                                        type: ElementType.TEXT,
-                                        name: `Emoji ${emoji}`,
-                                        text: emoji,
-                                        startTime: state.currentTime, 
-                                        duration: 3,
-                                        trackId: 0,
-                                        volume: 0, opacity: 1, rotation: 0, scale: 1, trimStart: 0,
-                                        fontSize: 100,
-                                        fadeIn: 0, fadeOut: 0,
-                                        playbackRate: 1,
-                                        x: 0, y: 0
-                                    };
-                                    dispatch({ type: 'ADD_ELEMENT', payload: newEl });
-                                }}
-                             >
-                                 {emoji}
-                             </button>
-                         ))}
-                     </div>
-                </div>
+                            <div className="grid grid-cols-3 gap-2">
+                                {getFilteredLibrary('OVERLAY').map(item => (
+                                    <div key={item.id} draggable onDragStart={(e) => { e.dataTransfer.setData('type', item.type); e.dataTransfer.setData('src', item.src); e.dataTransfer.setData('name', item.name); if(item.duration) e.dataTransfer.setData('duration', item.duration.toString())}} className="aspect-square bg-zinc-900 border border-zinc-800 rounded p-1 cursor-grab hover:border-lime-500 relative group">
+                                        <img src={item.src} className="w-full h-full object-contain" />
+                                        <button 
+                                            onClick={(e) => handleGalleryContextMenu(e, item.id)}
+                                            className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-400 bg-black/50 rounded-full p-0.5"
+                                        >
+                                            <Icons.X size={10} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+
+                             <div className="grid grid-cols-4 gap-2">
+                                 {DEFAULT_EMOJIS.map((emoji, idx) => (
+                                     <button 
+                                        key={idx}
+                                        className="aspect-square bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded flex items-center justify-center text-xl transition-colors"
+                                        onClick={() => {
+                                            const newEl = {
+                                                id: Math.random().toString(),
+                                                type: ElementType.TEXT,
+                                                name: `Emoji ${emoji}`,
+                                                text: emoji,
+                                                startTime: state.currentTime, 
+                                                duration: 3,
+                                                trackId: 0,
+                                                volume: 0, opacity: 1, rotation: 0, scale: 1, trimStart: 0,
+                                                fontSize: 100,
+                                                fadeIn: 0, fadeOut: 0,
+                                                playbackRate: 1,
+                                                x: 0, y: 0
+                                            };
+                                            dispatch({ type: 'ADD_ELEMENT', payload: newEl });
+                                        }}
+                                     >
+                                         {emoji}
+                                     </button>
+                                 ))}
+                             </div>
+                        </div>
+                    )}
+                 </div>
+
+                 {/* 2. Animated GIFs */}
+                 <div>
+                     <button className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-3" onClick={() => setIsGifsOpen(!isGifsOpen)}>
+                         <span>Animated GIFs</span>
+                         <span className="text-gray-600">{isGifsOpen ? '▼' : '▶'}</span>
+                    </button>
+                    {isGifsOpen && (
+                        <div className="space-y-3">
+                            <input 
+                                type="file" 
+                                ref={gifInputRef} 
+                                className="hidden" 
+                                accept="image/gif"
+                                multiple
+                                onChange={(e) => handleFileUpload(e, 'GIF')}
+                            />
+                            <div 
+                                className="border-2 border-dashed border-purple-500/30 bg-purple-900/10 rounded-xl p-3 text-center hover:border-purple-500/80 hover:bg-purple-500/10 transition-colors cursor-pointer"
+                                onClick={() => gifInputRef.current?.click()}
+                                onDragOver={(e) => { e.preventDefault(); }}
+                                onDrop={(e) => handleFileUpload(e, 'GIF')}
+                            >
+                                <Icons.Image className="w-5 h-5 text-purple-400 mx-auto mb-1" />
+                                <p className="text-[10px] text-purple-200">Drag GIFs Here</p>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-2">
+                                {getFilteredLibrary('GIF').map(item => (
+                                    <div key={item.id} draggable onDragStart={(e) => { e.dataTransfer.setData('type', item.type); e.dataTransfer.setData('src', item.src); e.dataTransfer.setData('name', item.name); if(item.duration) e.dataTransfer.setData('duration', item.duration.toString())}} className="aspect-square bg-zinc-900 border border-zinc-800 rounded overflow-hidden cursor-grab hover:border-purple-500 relative group">
+                                        <img src={item.src} className="w-full h-full object-cover" />
+                                         <button 
+                                            onClick={(e) => handleGalleryContextMenu(e, item.id)}
+                                            className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-400 bg-black/50 rounded-full p-0.5"
+                                        >
+                                            <Icons.X size={10} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                 </div>
+
+                 {/* 3. Transitions */}
+                 <div>
+                     <button className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-3" onClick={() => setIsTransitionsOpen(!isTransitionsOpen)}>
+                         <span>Transitions</span>
+                         <span className="text-gray-600">{isTransitionsOpen ? '▼' : '▶'}</span>
+                    </button>
+                    {isTransitionsOpen && (
+                        <div className="grid grid-cols-2 gap-2">
+                            {TRANSITIONS.map((t, i) => (
+                                <div 
+                                    key={i} 
+                                    draggable 
+                                    onDragStart={(e) => { 
+                                        e.dataTransfer.setData('type', ElementType.IMAGE); 
+                                        e.dataTransfer.setData('src', t.src); 
+                                        e.dataTransfer.setData('name', t.name); 
+                                        e.dataTransfer.setData('duration', '1');
+                                    }}
+                                    className={`h-16 ${t.color} rounded border border-zinc-700 hover:border-white cursor-grab flex items-center justify-center relative overflow-hidden`}
+                                >
+                                    {t.name === 'Glitch' && <img src={t.src} className="absolute inset-0 w-full h-full object-cover opacity-50" />}
+                                    <span className="text-[10px] font-bold text-white z-10 drop-shadow-md mix-blend-difference">{t.name}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                 </div>
             </div>
         )}
 
@@ -1082,7 +1175,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                         </label>
                                         <div className="flex gap-2 items-center">
                                             <input 
-                                                type="range" min="0.25" max="4" step="0.25" 
+                                                type="range" min="0.25" max="100" step="0.25" 
                                                 value={selectedElement.playbackRate || 1} 
                                                 onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
                                                 className="flex-1 accent-lime-500 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"

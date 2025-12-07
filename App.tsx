@@ -264,6 +264,12 @@ const App: React.FC = () => {
     e.preventDefault();
     if (state.view !== 'EDITOR') return;
     
+    // Calculate the next available track ID to ensure items land on a new line
+    const maxTrackId = state.elements.length > 0 
+        ? Math.max(...state.elements.map(e => e.trackId)) 
+        : -1;
+    const targetTrackId = maxTrackId + 1;
+    
     // 1. Handle Files from OS
     if (e.dataTransfer.files.length > 0) {
         const files = Array.from(e.dataTransfer.files) as File[];
@@ -294,7 +300,7 @@ const App: React.FC = () => {
                  name: file.name,
                  startTime: insertTime,
                  duration: duration,
-                 trackId: 0,
+                 trackId: targetTrackId, // Use the new empty track
                  volume: 1, opacity: 1, rotation: 0, scale: 1, trimStart: 0, 
                  fontSize: DEFAULT_FONT_SIZE,
                  fadeIn: 0, fadeOut: 0,
@@ -323,7 +329,7 @@ const App: React.FC = () => {
             name: name || (type === ElementType.VIDEO ? 'New Video' : 'New Image'),
             startTime: state.currentTime,
             duration: duration,
-            trackId: 0,
+            trackId: targetTrackId, // Use the new empty track
             volume: 1, opacity: 1, rotation: 0, scale: 1, trimStart: 0, 
             fontSize: DEFAULT_FONT_SIZE,
             fadeIn: 0, fadeOut: 0,

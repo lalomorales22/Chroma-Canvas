@@ -153,13 +153,6 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
         if (saved) {
             try {
                 const parsed = JSON.parse(saved);
-                // We need to re-instantiate streams that can be recovered (Camera/Mic IDs)
-                // However, MediaStreams cannot be serialized. We restore the *config* and placeholder streams.
-                // Real device re-acquisition would happen here if we wanted full restoration, 
-                // but for now we restore the windows and metadata.
-                // For Camera/Mic, we might need to prompt or auto-reconnect. 
-                // To keep it simple and robust: We restore the windows blank and let user re-select source OR auto-reconnect if deviceId exists.
-                
                 const restored = parsed.map((s: any) => ({
                     ...s,
                     stream: new MediaStream(), // Placeholders until reconnected
@@ -184,10 +177,6 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                             })
                             .catch(e => console.warn("Could not restore mic", e));
                     }
-                     else if (s.type === 'SCREEN') {
-                         // Screen share cannot be auto-restored due to security
-                         // It stays as a placeholder window user can re-activate or delete
-                    }
                 });
 
             } catch(e) { console.error("Layout restore failed", e); }
@@ -202,7 +191,6 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
     // Save layout on change
     useEffect(() => {
         if (streams.length > 0) {
-            // strip streams
             const serializable = streams.map(s => ({
                 ...s,
                 stream: undefined,
@@ -582,15 +570,50 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
         recordedChunksRef.current.clear();
 
         streams.forEach(s => {
+            let streamToRecord = s.stream;
+
+            // 1. Validate Stream: If empty or inactive, try to rescue from DOM
+            const hasTracks = streamToRecord.getTracks().length > 0;
+            const isActive = streamToRecord.active;
+
+            if (!hasTracks || !isActive) {
+                console.warn(`Stream ${s.id} (${s.name}) is empty or inactive. Attempting DOM rescue...`);
+                const element = document.getElementById(`source-${s.id}`) as HTMLCanvasElement | HTMLVideoElement;
+                
+                if (element) {
+                    if (element instanceof HTMLCanvasElement) {
+                        try {
+                            // Capture fresh stream from canvas
+                            streamToRecord = element.captureStream(30);
+                            if (s.originalStream) {
+                                s.originalStream.getAudioTracks().forEach(t => streamToRecord.addTrack(t));
+                            }
+                        } catch (e) {
+                            console.error("DOM rescue failed for canvas", e);
+                        }
+                    } else if (element instanceof HTMLVideoElement) {
+                        // For video elements, try to get the srcObject
+                        if (element.srcObject instanceof MediaStream && element.srcObject.active) {
+                            streamToRecord = element.srcObject;
+                        }
+                    }
+                }
+            }
+
+            // 2. Final Check
+            if (streamToRecord.getTracks().length === 0) {
+                 console.error(`Skipping stream ${s.id} (${s.name}): No tracks available after rescue attempt.`);
+                 return;
+            }
+
             // Prefer video/webm;codecs=vp9 for video, audio/webm for audio only
-            // For streams like Piano/Whiteboard that are generated canvas streams, we check support
             let mimeType = s.type === 'AUDIO' ? 'audio/webm' : 'video/webm;codecs=vp9';
             if (!MediaRecorder.isTypeSupported(mimeType)) {
                  mimeType = s.type === 'AUDIO' ? 'audio/webm' : 'video/webm';
             }
             
             try {
-                const recorder = new MediaRecorder(s.stream, { mimeType });
+                const recorder = new MediaRecorder(streamToRecord, { mimeType });
                 recordedChunksRef.current.set(s.id, []);
 
                 recorder.ondataavailable = (e) => {
@@ -608,9 +631,13 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
             }
         });
 
-        setIsRecording(true);
-        setRecordingTime(0);
-        timerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
+        if (mediaRecordersRef.current.size > 0) {
+            setIsRecording(true);
+            setRecordingTime(0);
+            timerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
+        } else {
+            alert("Could not start recording. No active streams found.");
+        }
     };
 
     const stopRecording = async () => {

@@ -44,7 +44,7 @@ export interface LibraryItem {
   type: ElementType;
   src: string;
   name: string;
-  category: 'VIDEO' | 'IMAGE' | 'AUDIO' | 'OVERLAY';
+  category: 'VIDEO' | 'IMAGE' | 'AUDIO' | 'OVERLAY' | 'GIF' | 'TRANSITION';
   duration?: number;
 }
 
