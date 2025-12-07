@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Icons } from './Icon';
 import { ElementType, LibraryItem } from '../types';
@@ -585,6 +584,11 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                         try {
                             // Capture fresh stream from canvas
                             streamToRecord = element.captureStream(30);
+                            
+                            // Note: For Piano, this rescue only gets Video. 
+                            // ideally state update should have worked, but this prevents crash.
+                            // If original stream had audio tracks, try to copy them? 
+                            // Likely original was empty, so we rely on visual at least.
                             if (s.originalStream) {
                                 s.originalStream.getAudioTracks().forEach(t => streamToRecord.addTrack(t));
                             }
@@ -607,13 +611,20 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
             }
 
             // Prefer video/webm;codecs=vp9 for video, audio/webm for audio only
+            // Fallback for Safari/others that don't support webm
             let mimeType = s.type === 'AUDIO' ? 'audio/webm' : 'video/webm;codecs=vp9';
             if (!MediaRecorder.isTypeSupported(mimeType)) {
-                 mimeType = s.type === 'AUDIO' ? 'audio/webm' : 'video/webm';
+                 const fallbacks = s.type === 'AUDIO' 
+                    ? ['audio/webm', 'audio/mp4', 'audio/ogg', '']
+                    : ['video/webm', 'video/mp4', ''];
+                 
+                 mimeType = fallbacks.find(t => t === '' || MediaRecorder.isTypeSupported(t)) || '';
             }
             
             try {
-                const recorder = new MediaRecorder(streamToRecord, { mimeType });
+                // If mimeType is empty string, let browser choose default
+                const options = mimeType ? { mimeType } : undefined;
+                const recorder = new MediaRecorder(streamToRecord, options);
                 recordedChunksRef.current.set(s.id, []);
 
                 recorder.ondataavailable = (e) => {
@@ -631,12 +642,13 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
             }
         });
 
+        // Only switch state if at least one recorder started
         if (mediaRecordersRef.current.size > 0) {
             setIsRecording(true);
             setRecordingTime(0);
             timerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
         } else {
-            alert("Could not start recording. No active streams found.");
+            alert("Could not start recording. No active streams found or format not supported.");
         }
     };
 
@@ -653,7 +665,9 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                     if (!streamInfo) { resolve(); return; }
 
                     const type = streamInfo.type === 'AUDIO' ? 'audio/webm' : 'video/webm';
-                    const blob = new Blob(chunks, { type });
+                    // We try to use the mimeType the recorder was initialized with if available, 
+                    // otherwise default blob type
+                    const blob = new Blob(chunks, { type: recorder.mimeType || type });
                     const url = URL.createObjectURL(blob);
                     
                     newLibraryItems.push({
@@ -743,8 +757,12 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
         };
 
         // Start Recording the Master Stream
-        const mimeType = 'video/webm;codecs=vp9'; 
-        const options = MediaRecorder.isTypeSupported(mimeType) ? { mimeType } : undefined;
+        let mimeType = 'video/webm;codecs=vp9';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+             mimeType = ['video/webm', 'video/mp4', ''].find(t => t === '' || MediaRecorder.isTypeSupported(t)) || '';
+        }
+
+        const options = mimeType ? { mimeType } : undefined;
         
         try {
             const recorder = new MediaRecorder(masterStream, options);
@@ -764,7 +782,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
             
             recorder.onstop = () => {
                 // Save the "Stream Archive"
-                const blob = new Blob(streamChunksRef.current, { type: 'video/webm' });
+                const blob = new Blob(streamChunksRef.current, { type: recorder.mimeType });
                 const url = URL.createObjectURL(blob);
                 onSave([{
                     id: Math.random().toString(36),
