@@ -1175,7 +1175,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                         </label>
                                         <div className="flex gap-2 items-center">
                                             <input 
-                                                type="range" min="0.25" max="100" step="0.25" 
+                                                type="range" min="0.25" max="8" step="0.25" 
                                                 value={selectedElement.playbackRate || 1} 
                                                 onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
                                                 className="flex-1 accent-lime-500 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"

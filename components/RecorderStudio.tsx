@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Icons } from './Icon';
 import { ElementType, LibraryItem } from '../types';
@@ -36,7 +37,7 @@ const createChromaKeyStream = (sourceStream: MediaStream): { stream: MediaStream
     const video = document.createElement('video');
     video.srcObject = sourceStream;
     video.muted = true;
-    video.play();
+    video.play().catch(e => console.warn("Chroma key video play interrupted", e));
 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -1607,25 +1608,32 @@ const ThreeDWindow: React.FC<{
             modelRef.current = null;
         }
 
-        loader.load(item.url, (gltf: any) => {
-            const model = gltf.scene;
-            
-            // Auto-Scale Logic
-            const box = new THREE.Box3().setFromObject(model);
-            const center = box.getCenter(new THREE.Vector3());
-            const size = box.getSize(new THREE.Vector3());
-            
-            // Calculate scale to fit within a 3x3x3 unit box (visible by default camera at z=5)
-            const maxDim = Math.max(size.x, size.y, size.z);
-            const targetSize = 3; 
-            const scale = targetSize / maxDim;
-            
-            model.position.sub(center); // Center at 0,0,0
-            model.scale.set(scale, scale, scale);
-            
-            sceneRef.current.add(model);
-            modelRef.current = model;
-        });
+        loader.load(
+            item.url, 
+            (gltf: any) => {
+                const model = gltf.scene;
+                
+                // Auto-Scale Logic
+                const box = new THREE.Box3().setFromObject(model);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                
+                // Calculate scale to fit within a 3x3x3 unit box (visible by default camera at z=5)
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const targetSize = 3; 
+                const scale = targetSize / maxDim;
+                
+                model.position.sub(center); // Center at 0,0,0
+                model.scale.set(scale, scale, scale);
+                
+                sceneRef.current.add(model);
+                modelRef.current = model;
+            },
+            undefined, // Progress
+            (error: any) => {
+                console.error("Error loading GLB model:", error);
+            }
+        );
         
         if (timerRef.current) clearTimeout(timerRef.current);
         
