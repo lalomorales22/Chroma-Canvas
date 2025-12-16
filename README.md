@@ -62,8 +62,8 @@ Broadcast your Recorder Studio canvas directly to **Twitch** or **YouTube**.
 
 1.  **Clone the repository**
     ```bash
-    git clone https://github.com/lalomorales22/Chroma-Canvas.git
-    cd chroma-canvas
+    git clone https://github.com/lalomorales22/chroma-canvas-video-editor.git
+    cd chroma-canvas-video-editor
     ```
 
 2.  **Install dependencies**
