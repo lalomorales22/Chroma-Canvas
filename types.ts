@@ -37,6 +37,9 @@ export interface CanvasElement {
   // Fades
   fadeIn: number; // Seconds
   fadeOut: number; // Seconds
+
+  // Procedural Animation Names (optional)
+  animationName?: string; 
 }
 
 export interface LibraryItem {
@@ -60,6 +63,8 @@ export interface EditorState {
   seekVersion: number; // Increments on manual seek to reset animation loop
   clipboard: CanvasElement | null;
   view: 'EDITOR' | 'RECORDER'; // New View State
+  isAutoFit: boolean; // Global auto-fit state
+  fitVersion: number; // Trigger for one-time fit
 }
 
 export interface ContextMenuState {

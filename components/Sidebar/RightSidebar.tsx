@@ -13,10 +13,73 @@ interface RightSidebarProps {
 }
 
 const TRANSITIONS = [
-    { name: "Fade Black", src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", color: "bg-black" },
-    { name: "Fade White", src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=", color: "bg-white" },
-    { name: "Glitch", src: "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3AyNXh6Y2F4Y3E4Y3E4Y3E4Y3E4Y3E4Y3E4Y3E4Y3E4YyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/L2r5pZc4X9lQ/giphy.gif", color: "bg-purple-900" } 
+    { 
+        name: "Fade Black", 
+        src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", 
+        color: "bg-black",
+        icon: <div className="w-4 h-4 bg-black border border-white/20" />
+    },
+    { 
+        name: "Fade White", 
+        src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=", 
+        color: "bg-white",
+        icon: <div className="w-4 h-4 bg-white" />
+    },
+    { 
+        name: "Glitch", 
+        src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", 
+        color: "bg-purple-950",
+        icon: <Icons.Signal size={14} className="text-purple-400" />
+    },
+    { 
+        name: "Spin", 
+        src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", 
+        color: "bg-blue-950",
+        icon: <Icons.Maximize size={14} className="text-blue-400" />
+    },
+    { 
+        name: "Swipe Left", 
+        src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", 
+        color: "bg-zinc-900",
+        icon: <Icons.Back size={14} className="text-gray-400" />
+    },
+    { 
+        name: "Swipe Right", 
+        src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", 
+        color: "bg-zinc-900",
+        icon: <Icons.Back size={14} className="text-gray-400 rotate-180" />
+    }
 ];
+
+const getProceduralTransform = (el: CanvasElement, currentTime: number, canvasMode: 'landscape' | 'portrait', isPlaying: boolean) => {
+    const progress = (currentTime - el.startTime) / el.duration;
+    const clampedProgress = Math.max(0, Math.min(1, progress));
+    
+    let x = el.x || 0;
+    let y = el.y || 0;
+    let rotation = el.rotation;
+    let scale = el.scale;
+
+    const canvasWidth = canvasMode === 'portrait' ? 720 : 1280;
+
+    if (el.name === 'Spin') {
+        rotation += clampedProgress * 360 * 2; 
+        scale *= (1 - Math.abs(clampedProgress - 0.5) * 0.5); 
+    } else if (el.name === 'Swipe Left') {
+        x += canvasWidth - (clampedProgress * canvasWidth * 2);
+    } else if (el.name === 'Swipe Right') {
+        x += -canvasWidth + (clampedProgress * canvasWidth * 2);
+    } else if (el.name === 'Glitch') {
+        if (isPlaying) {
+          x += (Math.random() - 0.5) * 60;
+          y += (Math.random() - 0.5) * 30;
+          scale *= (1 + (Math.random() - 0.5) * 0.1);
+          rotation += (Math.random() - 0.5) * 5;
+        }
+    }
+    
+    return { x, y, rotation, scale };
+};
 
 const getMediaDuration = (src: string, type: ElementType): Promise<number> => {
     return new Promise((resolve) => {
@@ -37,14 +100,14 @@ const getMediaDuration = (src: string, type: ElementType): Promise<number> => {
     });
 };
 
-// Media Layer Component for smooth playback sync
 const MediaLayer: React.FC<{ 
     element: CanvasElement, 
     currentTime: number, 
     isPlaying: boolean, 
-    canvasMode: string,
+    canvasMode: 'landscape' | 'portrait',
+    transform: { x: number, y: number, rotation: number, scale: number },
     onRef?: (el: HTMLMediaElement | null) => void 
-}> = ({ element, currentTime, isPlaying, canvasMode, onRef }) => {
+}> = ({ element, currentTime, isPlaying, canvasMode, transform, onRef }) => {
     const mediaRef = useRef<HTMLMediaElement>(null);
     const lastSyncTime = useRef<number>(-1);
 
@@ -58,18 +121,14 @@ const MediaLayer: React.FC<{
         const media = mediaRef.current;
         if (!media) return;
 
-        // Set speed first
         const rate = element.playbackRate || 1;
         if (media.playbackRate !== rate) {
             media.playbackRate = rate;
         }
 
-        // Timeline Logic
         const timeOnTrack = currentTime - element.startTime;
         const isWithinTimelineBounds = timeOnTrack >= 0 && timeOnTrack <= element.duration;
 
-        // Calculate Target Media Time
-        // target = trimStart + (elapsed_timeline_time * speed)
         const targetMediaTime = element.trimStart + (timeOnTrack * rate);
 
         if (!isWithinTimelineBounds) {
@@ -78,23 +137,18 @@ const MediaLayer: React.FC<{
         }
 
         if (isPlaying) {
-             // If we are supposed to be playing but aren't
              if (media.paused && media.readyState >= 2) {
-                 media.play().catch(e => { /* Auto-play block */ });
+                 media.play().catch(e => { });
              }
              
-             // Sync Logic
              const diff = Math.abs(media.currentTime - targetMediaTime);
              const isJump = Math.abs(currentTime - lastSyncTime.current) > 1.0;
 
-             // When playing, we allow small drift (0.4s) to avoid robotic stuttering,
-             // unless user manually jumped (seeked).
              if (diff > 0.4 || isJump) {
                  media.currentTime = targetMediaTime;
              }
         } else {
              if (!media.paused) media.pause();
-             // When paused, we want strict sync for scrubbing
              if (Math.abs(media.currentTime - targetMediaTime) > 0.1) {
                  media.currentTime = targetMediaTime;
              }
@@ -102,15 +156,12 @@ const MediaLayer: React.FC<{
         
         lastSyncTime.current = currentTime;
         
-        // --- Volume & Fade Logic ---
-        const clipTime = timeOnTrack; // Time relative to start of clip on timeline
+        const clipTime = timeOnTrack;
         let fadeMultiplier = 1;
         
-        // Fade In
         if (element.fadeIn > 0 && clipTime < element.fadeIn) {
             fadeMultiplier = Math.max(0, clipTime / element.fadeIn);
         }
-        // Fade Out
         else if (element.fadeOut > 0 && clipTime > element.duration - element.fadeOut) {
             fadeMultiplier = Math.max(0, (element.duration - clipTime) / element.fadeOut);
         }
@@ -119,12 +170,21 @@ const MediaLayer: React.FC<{
 
     }, [currentTime, isPlaying, element.startTime, element.trimStart, element.duration, element.volume, element.fadeIn, element.fadeOut, element.playbackRate]);
 
-    // Visibility Check
     const timeOnTrack = currentTime - element.startTime;
     const isVisible = timeOnTrack >= 0 && timeOnTrack <= element.duration;
     
     if (element.type === ElementType.AUDIO) {
-        return <audio ref={mediaRef as React.RefObject<HTMLAudioElement>} src={element.src} crossOrigin="anonymous" preload="auto" />;
+        return (
+            <audio 
+                ref={(el) => {
+                    (mediaRef as any).current = el;
+                    if (onRef) onRef(el);
+                }}
+                src={element.src} 
+                crossOrigin="anonymous" 
+                preload="auto" 
+            />
+        );
     }
 
     if (element.type === ElementType.VIDEO) {
@@ -134,14 +194,17 @@ const MediaLayer: React.FC<{
                 style={{
                     opacity: isVisible ? element.opacity : 0,
                     pointerEvents: isVisible ? 'auto' : 'none',
-                    transform: `translate(${element.x || 0}px, ${element.y || 0}px) scale(${element.scale}) rotate(${element.rotation}deg)`
+                    transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale}) rotate(${transform.rotation}deg)`
                 }}
             >
                 <video 
-                    ref={mediaRef as React.RefObject<HTMLVideoElement>} 
+                    ref={(el) => {
+                        (mediaRef as any).current = el;
+                        if (onRef) onRef(el);
+                    }}
                     src={element.src} 
                     className="w-full h-full object-cover" 
-                    muted={element.volume === 0} // visual mute helper
+                    muted={element.volume === 0}
                     crossOrigin="anonymous"
                     preload="auto"
                 />
@@ -152,44 +215,35 @@ const MediaLayer: React.FC<{
 };
 
 export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, width, setWidth }) => {
-  const [activeTab, setActiveTab] = useState<'gallery' | 'overlays' | 'properties'>('gallery');
+  const [activeTab, setActiveTab] = useState<'gallery' | 'overlays' | 'transitions' | 'properties'>('gallery');
   const [aiPrompt, setAiPrompt] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(false);
   const resizeStartRef = useRef<number | null>(null);
   const resizeStartWidthRef = useRef<number | null>(null);
   const [galleryContextMenu, setGalleryContextMenu] = useState<{ x: number, y: number, id: string | null }>({ x: 0, y: 0, id: null });
   
-  // Gallery Toggles
   const [isVideosOpen, setIsVideosOpen] = useState(true);
   const [isImagesOpen, setIsImagesOpen] = useState(true);
   const [isAudioOpen, setIsAudioOpen] = useState(true);
   
-  // Overlay Toggles
   const [isEmojisOpen, setIsEmojisOpen] = useState(true);
   const [isGifsOpen, setIsGifsOpen] = useState(true);
-  const [isTransitionsOpen, setIsTransitionsOpen] = useState(true);
 
-  // File Inputs
   const overlayInputRef = useRef<HTMLInputElement>(null);
   const gifInputRef = useRef<HTMLInputElement>(null);
 
-  // Export State
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   
-  // Refs for export rendering
   const exportCanvasRef = useRef<HTMLCanvasElement>(null);
   const mediaElementsRef = useRef<Map<string, HTMLMediaElement>>(new Map());
-  // Persistent Audio Context for exports to avoid "already connected" errors
   const exportAudioCtxRef = useRef<AudioContext | null>(null);
   const audioSourceNodeCache = useRef<WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>>(new WeakMap());
 
-  // Helper: Get primary selected element (last selected usually, or first)
   const selectedElementId = state.selectedIds[0];
   const selectedElement = state.elements.find(e => e.id === selectedElementId);
   const isMultiSelect = state.selectedIds.length > 1;
 
-  // --- Interactive Preview Dragging ---
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const [previewDrag, setPreviewDrag] = useState<{ id: string, startX: number, startY: number, initialElX: number, initialElY: number } | null>(null);
 
@@ -197,7 +251,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       e.stopPropagation();
       e.preventDefault();
       
-      // Select if not selected
       if (!state.selectedIds.includes(id)) {
           dispatch({ type: 'SELECT_ELEMENT', payload: id });
       }
@@ -217,8 +270,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
   useEffect(() => {
       const handleMouseMove = (e: MouseEvent) => {
           if (!previewDrag || !previewContainerRef.current) return;
-          
-          // Calculate scale factor between DOM preview and Canvas Resolution (1280 or 720)
           const rect = previewContainerRef.current.getBoundingClientRect();
           const canvasBaseWidth = state.canvasMode === 'landscape' ? 1280 : 720;
           const scaleFactor = canvasBaseWidth / rect.width;
@@ -252,11 +303,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       };
   }, [previewDrag, state.canvasMode, dispatch]);
 
-
-  // Playback Control
   const togglePlay = () => dispatch({ type: 'TOGGLE_PLAY' });
 
-  // Paste Handler for Overlays
   useEffect(() => {
       const handlePaste = async (e: ClipboardEvent) => {
           if (activeTab !== 'overlays') return;
@@ -286,8 +334,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       return () => window.removeEventListener('paste', handlePaste);
   }, [activeTab, dispatch]);
 
-
-  // Resize Handlers
   const startResizing = (e: React.MouseEvent) => {
       e.preventDefault();
       resizeStartRef.current = e.clientX;
@@ -310,7 +356,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       document.removeEventListener('mouseup', stopResizing);
   };
 
-  // Property Handlers
   const updateProperty = (key: keyof CanvasElement, value: any) => {
     if (state.selectedIds.length === 0) return;
     dispatch({
@@ -321,8 +366,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
   const handleSpeedChange = (newRate: number) => {
       if (!selectedElement) return;
-      
-      // Update all selected
       state.selectedIds.forEach(id => {
           const el = state.elements.find(e => e.id === id);
           if (el) {
@@ -344,7 +387,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       });
   };
 
-  // AI Generation Handler
   const handleAiGenerate = async (type: 'image' | 'text') => {
       if (!aiPrompt) return;
       setIsGenerating(true);
@@ -377,7 +419,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       setIsGenerating(false);
   };
 
-  // File Upload Handler
   const handleFileUpload = async (e: React.DragEvent<HTMLDivElement> | React.ChangeEvent<HTMLInputElement>, targetCategory: 'VIDEO' | 'IMAGE' | 'AUDIO' | 'OVERLAY' | 'GIF' = 'IMAGE') => {
       if (e.type === 'drop') {
           e.preventDefault();
@@ -388,7 +429,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       if ('dataTransfer' in e && e.dataTransfer) {
           files = Array.from(e.dataTransfer.files);
       } else if ('target' in e && e.target) {
-          // Explicitly check and cast target to avoid unknown type issues with files property
           const target = e.target as HTMLInputElement;
           if (target.files) {
               files = Array.from(target.files);
@@ -400,7 +440,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
           let type: ElementType = ElementType.IMAGE;
           let category = targetCategory;
 
-          // If GIF, force category
           if (file.type === 'image/gif') {
               type = ElementType.IMAGE;
               category = 'GIF';
@@ -430,28 +469,19 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
           dispatch({ type: 'ADD_LIBRARY_ITEM', payload: newItem });
       }
       
-      // Reset input if used
       if ('target' in e && e.target) {
           (e.target as HTMLInputElement).value = '';
       }
   };
 
-  // Export Logic
   const handleExport = async () => {
       if (isExporting) return;
-      
       const canvas = exportCanvasRef.current;
       if (!canvas) {
           alert("Export failed: Canvas not initialized.");
           return;
       }
-      
-      const mimeTypes = [
-        "video/mp4",
-        "video/webm;codecs=vp9", 
-        "video/webm;codecs=vp8", 
-        "video/webm"
-      ];
+      const mimeTypes = ["video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
       const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type));
       if (!mimeType) {
           alert("Your browser does not support MediaRecorder export.");
@@ -460,21 +490,16 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
 
       setIsExporting(true);
       setExportProgress(0);
-      
       if (state.isPlaying) dispatch({ type: 'TOGGLE_PLAY' });
-
       await new Promise(r => setTimeout(r, 200));
 
       const originalMediaStates = new Map<string, { muted: boolean, volume: number }>();
       const gainNodes = new Map<string, GainNode>();
-
-      // 1. Calculate Actual Content Duration (Fix for trailing black footage)
-      // We ignore state.duration (which is canvas size) and find the last element's end time.
       const contentEnd = state.elements.reduce((max, el) => Math.max(max, el.startTime + el.duration), 0);
-      const exportDuration = Math.max(1, contentEnd); // Minimum 1 second
+      const exportDuration = Math.max(1, contentEnd);
 
       try {
-        const imageUrls = new Set(state.elements.filter(e => e.type === ElementType.IMAGE).map(e => e.src));
+        const imageUrls = new Set<string>(state.elements.filter(e => e.type === ElementType.IMAGE && e.src).map(e => e.src as string));
         const imageCache = new Map<string, HTMLImageElement>();
         
         await Promise.all(Array.from(imageUrls).map(url => new Promise<void>((resolve) => {
@@ -486,7 +511,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
             img.onerror = () => { console.warn("Failed to load image for export:", url); resolve(); };
         })));
 
-        // 2. Initialize or Resume Persistent Audio Context
         if (!exportAudioCtxRef.current) {
              exportAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
         }
@@ -503,25 +527,20 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                 if (mediaEl) {
                     try {
                         originalMediaStates.set(el.id, { muted: mediaEl.muted, volume: mediaEl.volume });
-                        
                         mediaEl.muted = false; 
                         mediaEl.volume = 1;
-
                         let source: MediaElementAudioSourceNode;
                         if (audioSourceNodeCache.current.has(mediaEl)) {
                             source = audioSourceNodeCache.current.get(mediaEl)!;
-                            // Clean up previous connections to avoid double-gain or mixing issues
                             try { source.disconnect(); } catch(e) {} 
                         } else {
                             source = audioCtx.createMediaElementSource(mediaEl);
                             audioSourceNodeCache.current.set(mediaEl, source);
                         }
-                        
                         const gain = audioCtx.createGain();
                         gain.gain.value = el.volume; 
                         source.connect(gain);
                         gain.connect(dest);
-                        
                         gainNodes.set(el.id, gain);
                     } catch (e) {
                         console.warn("Audio mix warning:", e);
@@ -536,31 +555,14 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
         }
 
         const chunks: Blob[] = [];
-        const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
-        
-        recorder.ondataavailable = (e) => {
-            if (e.data.size > 0) chunks.push(e.data);
-        };
-        
+        const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 12000000 });
+        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
         recorder.onstop = () => {
             originalMediaStates.forEach((val, id) => {
                 const m = mediaElementsRef.current.get(id);
-                if(m) {
-                    m.muted = val.muted;
-                    m.volume = val.volume;
-                }
+                if(m) { m.muted = val.muted; m.volume = val.volume; }
             });
-
-            // Disconnect sources to clean up graph for next run
             gainNodes.forEach(g => g.disconnect());
-            state.elements.forEach(el => {
-                 const m = mediaElementsRef.current.get(el.id);
-                 if (m && audioSourceNodeCache.current.has(m)) {
-                     const s = audioSourceNodeCache.current.get(m);
-                     try { s?.disconnect(); } catch(e) {}
-                 }
-            });
-
             const blob = new Blob(chunks, { type: mimeType });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -568,131 +570,133 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
             const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
             a.download = `chromacanvas_export_${Date.now()}.${ext}`;
             a.click();
-            URL.revokeObjectURL(url);
-            
             setIsExporting(false);
         };
 
         recorder.start();
-
         const ctx = canvas.getContext('2d', { alpha: false }); 
         if (!ctx) throw new Error("Could not get 2D context");
-
         const startTime = performance.now();
         
         const tick = () => {
             if (!isExporting && recorder.state !== 'recording') return;
-            
             try {
                 const now = performance.now();
                 const elapsed = (now - startTime) / 1000;
-                
-                // 3. Stop exactly at calculated exportDuration
-                if (elapsed > exportDuration) {
-                    recorder.stop();
-                    return;
-                }
-
+                if (elapsed > exportDuration) { recorder.stop(); return; }
                 setExportProgress(Math.min(100, Math.round((elapsed / exportDuration) * 100)));
                 
                 ctx.fillStyle = '#000';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 
-                const activeElements = state.elements
-                  .filter(el => elapsed >= el.startTime && elapsed < el.startTime + el.duration)
-                  .sort((a, b) => a.trackId - b.trackId);
+                // Process ALL media elements for sync
+                state.elements.forEach(el => {
+                    if (el.type === ElementType.VIDEO || el.type === ElementType.AUDIO) {
+                        const mediaEl = mediaElementsRef.current.get(el.id);
+                        if (!mediaEl) return;
 
-                for (const el of activeElements) {
-                     let fadeMultiplier = 1;
+                        const isActive = elapsed >= el.startTime && elapsed < el.startTime + el.duration;
+                        const gainNode = gainNodes.get(el.id);
+
+                        if (isActive) {
+                            const clipTime = elapsed - el.startTime;
+                            const rate = el.playbackRate || 1;
+                            const targetTime = el.trimStart + (clipTime * rate);
+                            
+                            mediaEl.playbackRate = rate;
+                            if (Math.abs(mediaEl.currentTime - targetTime) > 0.2) {
+                                mediaEl.currentTime = targetTime;
+                            }
+                            if (mediaEl.paused) {
+                                mediaEl.play().catch(() => {});
+                            }
+
+                            // Calculate Fade Multiplier
+                            let fadeMultiplier = 1;
+                            if (el.fadeIn > 0 && clipTime < el.fadeIn) {
+                                fadeMultiplier = Math.max(0, clipTime / el.fadeIn);
+                            } else if (el.fadeOut > 0 && clipTime > el.duration - el.fadeOut) {
+                                fadeMultiplier = Math.max(0, (el.duration - clipTime) / el.fadeOut);
+                            }
+                            if (gainNode) { gainNode.gain.value = el.volume * fadeMultiplier; }
+
+                            // Render Video to Canvas
+                            if (el.type === ElementType.VIDEO) {
+                                const transform = getProceduralTransform(el, elapsed, state.canvasMode, true);
+                                ctx.save();
+                                const cx = canvas.width / 2 + transform.x;
+                                const cy = canvas.height / 2 + transform.y;
+                                ctx.translate(cx, cy);
+                                ctx.rotate((transform.rotation * Math.PI) / 180);
+                                ctx.scale(transform.scale, transform.scale);
+                                ctx.globalAlpha = el.opacity * fadeMultiplier;
+
+                                const vEl = mediaEl as HTMLVideoElement;
+                                if (vEl.videoWidth) {
+                                    const scale = Math.max(canvas.width / vEl.videoWidth, canvas.height / vEl.videoHeight);
+                                    const w = vEl.videoWidth * scale; const h = vEl.videoHeight * scale;
+                                    ctx.drawImage(vEl, -w/2, -h/2, w, h);
+                                }
+                                ctx.restore();
+                            }
+                        } else {
+                            if (!mediaEl.paused) mediaEl.pause();
+                        }
+                    }
+                });
+
+                // Render Non-Media Elements
+                const activeOverlays = state.elements
+                  .filter(el => el.type !== ElementType.VIDEO && el.type !== ElementType.AUDIO)
+                  .filter(el => elapsed >= el.startTime && elapsed < el.startTime + el.duration);
+
+                for (const el of activeOverlays) {
                      const clipTime = elapsed - el.startTime;
+                     let fadeMultiplier = 1;
                      if (el.fadeIn > 0 && clipTime < el.fadeIn) {
                          fadeMultiplier = Math.max(0, clipTime / el.fadeIn);
                      } else if (el.fadeOut > 0 && clipTime > el.duration - el.fadeOut) {
                          fadeMultiplier = Math.max(0, (el.duration - clipTime) / el.fadeOut);
                      }
                      
-                     const gainNode = gainNodes.get(el.id);
-                     if (gainNode) {
-                         gainNode.gain.value = el.volume * fadeMultiplier;
-                     }
+                     const transform = getProceduralTransform(el, elapsed, state.canvasMode, true);
 
                      ctx.save();
-                     const cx = canvas.width / 2 + (el.x || 0);
-                     const cy = canvas.height / 2 + (el.y || 0);
+                     const cx = canvas.width / 2 + transform.x;
+                     const cy = canvas.height / 2 + transform.y;
                      ctx.translate(cx, cy);
-                     ctx.rotate((el.rotation * Math.PI) / 180);
-                     ctx.scale(el.scale, el.scale);
+                     ctx.rotate((transform.rotation * Math.PI) / 180);
+                     ctx.scale(transform.scale, transform.scale);
                      ctx.globalAlpha = el.opacity * fadeMultiplier;
 
-                     if (el.type === ElementType.VIDEO) {
-                         const videoEl = mediaElementsRef.current.get(el.id) as HTMLVideoElement;
-                         if (videoEl) {
-                             const rate = el.playbackRate || 1;
-                             const targetVideoTime = el.trimStart + (clipTime * rate);
-                             
-                             videoEl.playbackRate = rate;
-                             if (Math.abs(videoEl.currentTime - targetVideoTime) > 0.3) {
-                                  videoEl.currentTime = targetVideoTime;
-                             }
-                             if (videoEl.paused) videoEl.play().catch(()=>{});
-                             
-                             if (videoEl.videoWidth) {
-                                const scale = Math.max(canvas.width / videoEl.videoWidth, canvas.height / videoEl.videoHeight);
-                                const w = videoEl.videoWidth * scale;
-                                const h = videoEl.videoHeight * scale;
-                                ctx.drawImage(videoEl, -w/2, -h/2, w, h);
-                             }
-                         }
-                     } else if (el.type === ElementType.IMAGE) {
-                         if (el.src) {
-                             const img = imageCache.get(el.src);
+                     if (el.type === ElementType.IMAGE) {
+                         const imageSrc = el.src as string | undefined;
+                         if (imageSrc) {
+                             const img = imageCache.get(imageSrc);
                              if (img) { 
                                   const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
-                                  const w = img.width * scale;
-                                  const h = img.height * scale;
+                                  const w = img.width * scale; const h = img.height * scale;
                                   ctx.drawImage(img, -w/2, -h/2, w, h);
                              }
                          }
                      } else if (el.type === ElementType.TEXT) {
                           ctx.font = `bold ${el.fontSize || 40}px Inter`;
-                          ctx.fillStyle = 'white';
-                          ctx.textAlign = 'center';
-                          ctx.textBaseline = 'middle';
+                          ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
                           ctx.fillText(el.text || '', 0, 0);
                      }
                      ctx.restore();
-                     
-                     if (el.type === ElementType.AUDIO) {
-                        const audioEl = mediaElementsRef.current.get(el.id);
-                        if (audioEl) {
-                             const rate = el.playbackRate || 1;
-                             const targetTime = el.trimStart + (clipTime * rate);
-                             audioEl.playbackRate = rate;
-                             if (Math.abs(audioEl.currentTime - targetTime) > 0.3) {
-                                  audioEl.currentTime = targetTime;
-                             }
-                             if (audioEl.paused) audioEl.play().catch(()=>{});
-                        }
-                     }
                 }
-                
+
                 requestAnimationFrame(tick);
-            } catch (err) {
-                console.error("Export Frame Error:", err);
-                requestAnimationFrame(tick);
+            } catch (err) { 
+                console.error("Render loop error", err);
+                requestAnimationFrame(tick); 
             }
         };
-        
         tick();
-
-      } catch (error) {
-          console.error("Fatal Export Error:", error);
-          alert("Export failed due to an unexpected error.");
-          setIsExporting(false);
-          originalMediaStates.forEach((val, id) => {
-                const m = mediaElementsRef.current.get(id);
-                if(m) { m.muted = val.muted; m.volume = val.volume; }
-          });
+      } catch (error) { 
+          console.error("Export failure", error);
+          setIsExporting(false); 
       }
   };
 
@@ -733,48 +737,52 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
          >
              {state.elements
                 .sort((a, b) => a.trackId - b.trackId)
-                .map(el => (
-                    <React.Fragment key={el.id}>
-                        {(el.type === ElementType.VIDEO || el.type === ElementType.AUDIO) ? (
-                            <MediaLayer 
-                                element={el} 
-                                currentTime={state.currentTime} 
-                                isPlaying={state.isPlaying}
-                                canvasMode={state.canvasMode}
-                                onRef={(ref) => {
-                                    if (ref) mediaElementsRef.current.set(el.id, ref);
-                                    else mediaElementsRef.current.delete(el.id);
-                                }}
-                            />
-                        ) : (
-                            (state.currentTime >= el.startTime && state.currentTime < el.startTime + el.duration) && (
-                                <div 
-                                    className="absolute inset-0 flex items-center justify-center transition-all cursor-move hover:ring-1 hover:ring-lime-500/50"
-                                    onMouseDown={(e) => handlePreviewMouseDown(e, el.id)}
-                                    style={{
-                                        opacity: el.opacity,
-                                        transform: `translate(${el.x || 0}px, ${el.y || 0}px) scale(${el.scale}) rotate(${el.rotation}deg)`
+                .map(el => {
+                    const transform = getProceduralTransform(el, state.currentTime, state.canvasMode, state.isPlaying);
+                    return (
+                        <React.Fragment key={el.id}>
+                            {(el.type === ElementType.VIDEO || el.type === ElementType.AUDIO) ? (
+                                <MediaLayer 
+                                    element={el} 
+                                    currentTime={state.currentTime} 
+                                    isPlaying={state.isPlaying}
+                                    canvasMode={state.canvasMode}
+                                    transform={transform}
+                                    onRef={(ref) => {
+                                        if (ref) mediaElementsRef.current.set(el.id, ref);
+                                        else mediaElementsRef.current.delete(el.id);
                                     }}
-                                >
-                                    {el.type === ElementType.IMAGE && (
-                                        <img src={el.src} className="w-full h-full object-contain pointer-events-none" alt="" />
-                                    )}
-                                    {el.type === ElementType.TEXT && (
-                                        <h1 
-                                            className="font-bold text-white drop-shadow-lg text-center leading-tight whitespace-pre-wrap px-4 pointer-events-none" 
-                                            style={{ 
-                                                fontFamily: 'Inter',
-                                                fontSize: `${el.fontSize || 40}px`
-                                            }}
-                                        >
-                                            {el.text}
-                                        </h1>
-                                    )}
-                                </div>
-                            )
-                        )}
-                    </React.Fragment>
-                ))
+                                />
+                            ) : (
+                                (state.currentTime >= el.startTime && state.currentTime < el.startTime + el.duration) && (
+                                    <div 
+                                        className="absolute inset-0 flex items-center justify-center transition-all cursor-move hover:ring-1 hover:ring-lime-500/50"
+                                        onMouseDown={(e) => handlePreviewMouseDown(e, el.id)}
+                                        style={{
+                                            opacity: el.opacity,
+                                            transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale}) rotate(${transform.rotation}deg)`
+                                        }}
+                                    >
+                                        {el.type === ElementType.IMAGE && (
+                                            <img src={el.src} className="w-full h-full object-contain pointer-events-none" alt="" />
+                                        )}
+                                        {el.type === ElementType.TEXT && (
+                                            <h1 
+                                                className="font-bold text-white drop-shadow-lg text-center leading-tight whitespace-pre-wrap px-4 pointer-events-none" 
+                                                style={{ 
+                                                    fontFamily: 'Inter',
+                                                    fontSize: `${el.fontSize || 40}px`
+                                                }}
+                                            >
+                                                {el.text}
+                                            </h1>
+                                        )}
+                                    </div>
+                                )
+                            )}
+                        </React.Fragment>
+                    );
+                })
              }
          </div>
          
@@ -788,21 +796,27 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
          </div>
       </div>
 
-      <div className="flex border-b border-zinc-800 shrink-0">
+      <div className="flex border-b border-zinc-800 shrink-0 overflow-x-auto custom-scrollbar">
         <button 
-            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'gallery' ? 'text-white border-b-2 border-lime-500' : 'text-gray-400 hover:text-white'}`}
+            className={`flex-1 min-w-[70px] py-3 text-[10px] font-bold uppercase tracking-wider ${activeTab === 'gallery' ? 'text-white border-b-2 border-lime-500 bg-white/5' : 'text-gray-400 hover:text-white'}`}
             onClick={() => setActiveTab('gallery')}
         >
             Gallery
         </button>
          <button 
-            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'overlays' ? 'text-white border-b-2 border-lime-500' : 'text-gray-400 hover:text-white'}`}
+            className={`flex-1 min-w-[75px] py-3 text-[10px] font-bold uppercase tracking-wider ${activeTab === 'overlays' ? 'text-white border-b-2 border-lime-500 bg-white/5' : 'text-gray-400 hover:text-white'}`}
             onClick={() => setActiveTab('overlays')}
         >
             Overlays
         </button>
         <button 
-            className={`flex-1 py-3 text-sm font-medium ${activeTab === 'properties' ? 'text-white border-b-2 border-lime-500' : 'text-gray-400 hover:text-white'}`}
+            className={`flex-1 min-w-[85px] py-3 text-[10px] font-bold uppercase tracking-wider ${activeTab === 'transitions' ? 'text-white border-b-2 border-lime-500 bg-white/5' : 'text-gray-400 hover:text-white'}`}
+            onClick={() => setActiveTab('transitions')}
+        >
+            Transitions
+        </button>
+        <button 
+            className={`flex-1 min-w-[70px] py-3 text-[10px] font-bold uppercase tracking-wider ${activeTab === 'properties' ? 'text-white border-b-2 border-lime-500 bg-white/5' : 'text-gray-400 hover:text-white'}`}
             onClick={() => setActiveTab('properties')}
         >
             Adjust
@@ -870,8 +884,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                             </div>
                         )}
                         </div>
-                        {/* Images */}
-                         <div>
+                        <div>
                         <button className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-2" onClick={() => setIsImagesOpen(!isImagesOpen)}>
                             <span className="flex items-center gap-2"><Icons.Image size={10} /> Images</span>
                             <span className="text-gray-600">{isImagesOpen ? '▼' : '▶'}</span>
@@ -903,7 +916,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                             </div>
                         )}
                         </div>
-                         {/* Audio */}
                           <div>
                         <button className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-2" onClick={() => setIsAudioOpen(!isAudioOpen)}>
                             <span className="flex items-center gap-2"><Icons.Music size={10} /> Audio</span>
@@ -926,7 +938,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
         
         {activeTab === 'overlays' && (
              <div className="space-y-6">
-                 {/* 1. Emojis & PNGs */}
                  <div>
                     <button className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-3" onClick={() => setIsEmojisOpen(!isEmojisOpen)}>
                          <span>Emojis & PNGs</span>
@@ -997,7 +1008,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                     )}
                  </div>
 
-                 {/* 2. Animated GIFs */}
                  <div>
                      <button className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-3" onClick={() => setIsGifsOpen(!isGifsOpen)}>
                          <span>Animated GIFs</span>
@@ -1039,35 +1049,45 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                         </div>
                     )}
                  </div>
-
-                 {/* 3. Transitions */}
-                 <div>
-                     <button className="w-full flex items-center justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mb-3" onClick={() => setIsTransitionsOpen(!isTransitionsOpen)}>
-                         <span>Transitions</span>
-                         <span className="text-gray-600">{isTransitionsOpen ? '▼' : '▶'}</span>
-                    </button>
-                    {isTransitionsOpen && (
-                        <div className="grid grid-cols-2 gap-2">
-                            {TRANSITIONS.map((t, i) => (
-                                <div 
-                                    key={i} 
-                                    draggable 
-                                    onDragStart={(e) => { 
-                                        e.dataTransfer.setData('type', ElementType.IMAGE); 
-                                        e.dataTransfer.setData('src', t.src); 
-                                        e.dataTransfer.setData('name', t.name); 
-                                        e.dataTransfer.setData('duration', '1');
-                                    }}
-                                    className={`h-16 ${t.color} rounded border border-zinc-700 hover:border-white cursor-grab flex items-center justify-center relative overflow-hidden`}
-                                >
-                                    {t.name === 'Glitch' && <img src={t.src} className="absolute inset-0 w-full h-full object-cover opacity-50" />}
-                                    <span className="text-[10px] font-bold text-white z-10 drop-shadow-md mix-blend-difference">{t.name}</span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                 </div>
             </div>
+        )}
+
+        {activeTab === 'transitions' && (
+             <div className="space-y-4">
+                 <div className="grid grid-cols-2 gap-3">
+                    {TRANSITIONS.map((t, i) => (
+                        <div 
+                            key={i} 
+                            draggable 
+                            onDragStart={(e) => { 
+                                e.dataTransfer.setData('type', ElementType.IMAGE); 
+                                e.dataTransfer.setData('src', t.src); 
+                                e.dataTransfer.setData('name', t.name); 
+                                e.dataTransfer.setData('duration', '1');
+                            }}
+                            className={`group relative h-20 ${t.color} rounded-xl border border-zinc-800 hover:border-lime-500 cursor-grab flex flex-col items-center justify-center gap-2 overflow-hidden transition-all shadow-lg hover:shadow-lime-500/10`}
+                        >
+                            <div className="z-10 bg-black/40 p-2 rounded-full backdrop-blur-sm group-hover:scale-110 transition-transform">
+                                {t.icon}
+                            </div>
+                            <span className="text-[10px] font-bold text-white z-10 tracking-tight uppercase group-hover:text-lime-400 transition-colors drop-shadow-md">{t.name}</span>
+                            
+                            {/* Visual Hint of Motion */}
+                            <div className="absolute inset-0 opacity-0 group-hover:opacity-10 pointer-events-none transition-opacity bg-gradient-to-r from-white/0 via-white to-white/0 animate-[shimmer_2s_infinite]" />
+                        </div>
+                    ))}
+                 </div>
+                 
+                 <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl mt-4">
+                     <div className="flex items-center gap-2 mb-2 text-zinc-400">
+                         <Icons.Magic size={12} />
+                         <span className="text-[10px] font-bold uppercase">Pro Tip</span>
+                     </div>
+                     <p className="text-[10px] text-zinc-500 leading-relaxed">
+                         Drag transitions onto the timeline. Place them on a track above your clips to create cinematic wipes and fades.
+                     </p>
+                 </div>
+             </div>
         )}
 
         {activeTab === 'properties' && (
@@ -1088,7 +1108,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                 {isMultiSelect ? 'Multiple Selection' : selectedElement.name}
                             </h3>
 
-                            {/* Position Controls */}
                             <div className="grid grid-cols-2 gap-2">
                                 <div className="space-y-1">
                                     <label className="text-[10px] text-gray-400 uppercase">Pos X</label>
