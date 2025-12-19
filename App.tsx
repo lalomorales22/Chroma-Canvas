@@ -6,6 +6,7 @@ import { Timeline } from './components/Canvas/Timeline';
 import { RightSidebar } from './components/Sidebar/RightSidebar';
 import { RecorderStudio } from './components/RecorderStudio';
 import { Icons } from './components/Icon';
+import { removeBackground } from './services/geminiService';
 
 // Empty Initial Library
 const initialLibrary: LibraryItem[] = [];
@@ -127,7 +128,10 @@ const reducer = (state: EditorState, action: any): EditorState => {
                 name: `${vid.name} (Audio)`,
                 opacity: 1, 
                 fadeIn: 0, fadeOut: 0,
-                volume: vid.volume
+                volume: vid.volume,
+                trimStart: vid.trimStart,
+                duration: vid.duration,
+                playbackRate: vid.playbackRate
              };
              newElements = newElements.map(e => e.id === vid.id ? { ...e, volume: 0 } : e).concat(audioEl);
           }
@@ -183,6 +187,7 @@ const App: React.FC = () => {
   const requestRef = useRef<number | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, targetId: null });
   const [sidebarWidth, setSidebarWidth] = useState(320);
+  const [isProcessingBg, setIsProcessingBg] = useState(false);
 
   // Playback Loop
   useEffect(() => {
@@ -207,7 +212,7 @@ const App: React.FC = () => {
     return () => {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
-  }, [state.isPlaying, state.seekVersion]);
+  }, [state.isPlaying, state.seekVersion, state.duration]);
 
   // Global Keyboard Shortcuts
   useEffect(() => {
@@ -239,6 +244,36 @@ const App: React.FC = () => {
       y: e.clientY,
       targetId: id
     });
+  };
+
+  const handleRemoveBg = async (id: string) => {
+      const el = state.elements.find(e => e.id === id);
+      if (!el || !el.src) return;
+      
+      setIsProcessingBg(true);
+      try {
+          // Fetch the image as blob to get its mime type and then to base64
+          const res = await fetch(el.src);
+          const blob = await res.blob();
+          const reader = new FileReader();
+          const base64 = await new Promise<string>((resolve) => {
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.readAsDataURL(blob);
+          });
+
+          const newSrc = await removeBackground(base64, blob.type);
+          if (newSrc) {
+              dispatch({ 
+                  type: 'UPDATE_ELEMENT', 
+                  payload: { id, changes: { src: newSrc, name: `${el.name} (No BG)` } } 
+              });
+          }
+      } catch (err) {
+          console.error("Remove BG failed", err);
+      } finally {
+          setIsProcessingBg(false);
+          closeContextMenu();
+      }
   };
 
   const closeContextMenu = () => setContextMenu({ ...contextMenu, visible: false });
@@ -309,6 +344,8 @@ const App: React.FC = () => {
     }
   };
 
+  const selectedElement = state.elements.find(e => e.id === contextMenu.targetId);
+
   return (
     <div 
         className="h-screen w-screen bg-black flex items-center justify-center p-6 text-stone-200 overflow-hidden" 
@@ -349,7 +386,6 @@ const App: React.FC = () => {
                         </div>
                         
                         <div className="flex items-center gap-2">
-                            {/* Fit Controls placed to the left of zoom per user request */}
                             <div className="flex items-center gap-1 mr-2">
                                 <button 
                                     onClick={() => dispatch({ type: 'TOGGLE_AUTO_FIT' })}
@@ -392,6 +428,17 @@ const App: React.FC = () => {
                             <div className="px-4 py-1 text-[10px] text-gray-500 font-bold uppercase">
                                 {state.selectedIds.length > 1 ? `${state.selectedIds.length} Items Selected` : 'Actions'}
                             </div>
+                            
+                            {selectedElement?.type === ElementType.IMAGE && (
+                                <button 
+                                    className="w-full text-left px-4 py-2 hover:bg-lime-900/20 text-lime-400 flex items-center gap-2" 
+                                    onClick={() => handleRemoveBg(contextMenu.targetId!)}
+                                    disabled={isProcessingBg}
+                                >
+                                    <Icons.Magic size={14} /> {isProcessingBg ? 'Processing...' : 'Magic: Remove BG'}
+                                </button>
+                            )}
+
                             <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => dispatch({ type: 'COPY_ELEMENT', payload: contextMenu.targetId })}>
                                 <Icons.Copy size={14} /> Copy
                             </button>

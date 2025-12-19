@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { EditorState, CanvasElement, ElementType, LibraryItem } from '../../types';
 import { Icons } from '../Icon';
-import { generateImage } from '../../services/geminiService';
+import { generateImage, generateVideo } from '../../services/geminiService';
 import { DEFAULT_IMAGE_DURATION, DEFAULT_EMOJIS, DEFAULT_FONT_SIZE } from '../../constants';
 
 interface RightSidebarProps {
@@ -218,6 +218,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
   const [activeTab, setActiveTab] = useState<'gallery' | 'overlays' | 'transitions' | 'properties'>('gallery');
   const [aiPrompt, setAiPrompt] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [targetAspectRatio, setTargetAspectRatio] = useState<"16:9" | "9:16">("16:9");
   const resizeStartRef = useRef<number | null>(null);
   const resizeStartWidthRef = useRef<number | null>(null);
   const [galleryContextMenu, setGalleryContextMenu] = useState<{ x: number, y: number, id: string | null }>({ x: 0, y: 0, id: null });
@@ -387,8 +388,17 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       });
   };
 
-  const handleAiGenerate = async (type: 'image' | 'text') => {
+  const handleAiGenerate = async (type: 'image' | 'text' | 'video') => {
       if (!aiPrompt) return;
+      
+      // Veo safety check
+      if (type === 'video') {
+        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+            await (window as any).aistudio.openSelectKey();
+        }
+      }
+
       setIsGenerating(true);
 
       const promptStr = aiPrompt;
@@ -400,22 +410,40 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
           finalName = `Art: ${promptStr}`;
       }
 
-      const imageUrl = await generateImage(finalPrompt);
-      
-      if (imageUrl) {
-          const newItem: LibraryItem = {
-              id: Math.random().toString(36),
-              type: ElementType.IMAGE,
-              src: imageUrl,
-              name: finalName,
-              category: 'IMAGE',
-              duration: DEFAULT_IMAGE_DURATION
-          };
-          dispatch({ type: 'ADD_LIBRARY_ITEM', payload: newItem });
-          setAiPrompt('');
-      } else {
-          console.error("Failed to generate image");
+      try {
+          if (type === 'video') {
+              const videoUrl = await generateVideo(promptStr, targetAspectRatio);
+              if (videoUrl) {
+                  const newItem: LibraryItem = {
+                      id: Math.random().toString(36),
+                      type: ElementType.VIDEO,
+                      src: videoUrl,
+                      name: `AI: ${promptStr}`,
+                      category: 'VIDEO',
+                      duration: 5 // Default for fast-preview
+                  };
+                  dispatch({ type: 'ADD_LIBRARY_ITEM', payload: newItem });
+                  setAiPrompt('');
+              }
+          } else {
+              const imageUrl = await generateImage(finalPrompt, targetAspectRatio);
+              if (imageUrl) {
+                  const newItem: LibraryItem = {
+                      id: Math.random().toString(36),
+                      type: ElementType.IMAGE,
+                      src: imageUrl,
+                      name: finalName,
+                      category: 'IMAGE',
+                      duration: DEFAULT_IMAGE_DURATION
+                  };
+                  dispatch({ type: 'ADD_LIBRARY_ITEM', payload: newItem });
+                  setAiPrompt('');
+              }
+          }
+      } catch (err) {
+          console.error("AI Generation Error", err);
       }
+      
       setIsGenerating(false);
   };
 
@@ -826,35 +854,66 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
       <div className="flex-1 overflow-y-auto p-4 custom-scrollbar relative bg-black">
         {activeTab === 'gallery' && (
              <div className="space-y-6">
-                 <div className="bg-gradient-to-br from-green-900 to-lime-950 p-4 rounded-xl border border-lime-900">
-                    <div className="flex items-center gap-2 mb-3 text-lime-400">
-                        <Icons.Magic className="w-4 h-4" />
-                        <span className="text-xs font-bold uppercase tracking-wider">Gemini Studio</span>
+                 <div className="bg-gradient-to-br from-zinc-900 to-black p-4 rounded-xl border border-zinc-800">
+                    <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2 text-lime-400">
+                            <Icons.Magic className="w-4 h-4" />
+                            <span className="text-xs font-bold uppercase tracking-wider">Gemini Studio</span>
+                        </div>
+                        {/* Aspect Ratio Toggle */}
+                        <div className="flex gap-1 bg-black/40 p-1 rounded-lg border border-white/5">
+                            <button 
+                                onClick={() => setTargetAspectRatio("16:9")}
+                                className={`p-1 rounded text-[10px] font-bold transition-all ${targetAspectRatio === '16:9' ? 'bg-lime-800 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                            >
+                                16:9
+                            </button>
+                            <button 
+                                onClick={() => setTargetAspectRatio("9:16")}
+                                className={`p-1 rounded text-[10px] font-bold transition-all ${targetAspectRatio === '9:16' ? 'bg-lime-800 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                            >
+                                9:16
+                            </button>
+                        </div>
                     </div>
                     <textarea 
                         className="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-lime-500 resize-none h-16 mb-3"
-                        placeholder="Describe an image or text art..."
+                        placeholder="Describe an asset to generate..."
                         value={aiPrompt}
                         onChange={(e) => setAiPrompt(e.target.value)}
                     />
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                         <button 
                             disabled={isGenerating || !aiPrompt}
                             onClick={() => handleAiGenerate('image')}
-                            className="flex-1 py-2 bg-lime-800 hover:bg-lime-700 disabled:opacity-50 rounded-lg text-xs font-medium text-white transition-colors flex items-center justify-center gap-2"
+                            className="flex-1 min-w-[80px] py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 rounded-lg text-xs font-medium text-white transition-colors flex items-center justify-center gap-2 border border-white/5"
                         >
                             <Icons.Image size={12} />
-                            {isGenerating ? 'Gen...' : 'Gen Image'}
+                            {isGenerating ? '...' : 'Img'}
+                        </button>
+                        <button 
+                            disabled={isGenerating || !aiPrompt}
+                            onClick={() => handleAiGenerate('video')}
+                            className="flex-1 min-w-[80px] py-2 bg-lime-900 hover:bg-lime-800 disabled:opacity-50 rounded-lg text-xs font-medium text-lime-200 transition-colors flex items-center justify-center gap-2 border border-lime-700/50"
+                        >
+                            <Icons.Video size={12} />
+                            {isGenerating ? '...' : 'Video'}
                         </button>
                         <button 
                             disabled={isGenerating || !aiPrompt}
                             onClick={() => handleAiGenerate('text')}
-                            className="flex-1 py-2 bg-green-800 hover:bg-green-700 disabled:opacity-50 rounded-lg text-xs font-medium text-white transition-colors flex items-center justify-center gap-2"
+                            className="flex-1 min-w-[80px] py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 rounded-lg text-xs font-medium text-white transition-colors flex items-center justify-center gap-2 border border-white/5"
                         >
                              <Icons.Type size={12} />
-                             {isGenerating ? 'Gen...' : 'Gen Text Art'}
+                             {isGenerating ? '...' : 'Text Art'}
                         </button>
                     </div>
+                    {isGenerating && (
+                        <div className="mt-3 flex items-center gap-2 text-[10px] text-lime-500 font-bold animate-pulse">
+                            <Icons.Magic className="w-3 h-3" />
+                            Crafting your masterpiece...
+                        </div>
+                    )}
                 </div>
 
                 <div 
