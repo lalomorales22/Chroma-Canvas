@@ -59,6 +59,7 @@ const getProceduralTransform = (el: CanvasElement, currentTime: number, canvasMo
     let y = el.y || 0;
     let rotation = el.rotation;
     let scale = el.scale;
+    let opacityMultiplier = 1;
 
     const canvasWidth = canvasMode === 'portrait' ? 720 : 1280;
 
@@ -76,9 +77,12 @@ const getProceduralTransform = (el: CanvasElement, currentTime: number, canvasMo
           scale *= (1 + (Math.random() - 0.5) * 0.1);
           rotation += (Math.random() - 0.5) * 5;
         }
+    } else if (el.name === 'Fade Black' || el.name === 'Fade White') {
+        // Triangular Dip: 0 -> 1 (at midpoint) -> 0
+        opacityMultiplier = 1 - Math.abs(clampedProgress - 0.5) * 2;
     }
     
-    return { x, y, rotation, scale };
+    return { x, y, rotation, scale, opacityMultiplier };
 };
 
 const getMediaDuration = (src: string, type: ElementType): Promise<number> => {
@@ -105,7 +109,7 @@ const MediaLayer: React.FC<{
     currentTime: number, 
     isPlaying: boolean, 
     canvasMode: 'landscape' | 'portrait',
-    transform: { x: number, y: number, rotation: number, scale: number },
+    transform: { x: number, y: number, rotation: number, scale: number, opacityMultiplier: number },
     onRef?: (el: HTMLMediaElement | null) => void 
 }> = ({ element, currentTime, isPlaying, canvasMode, transform, onRef }) => {
     const mediaRef = useRef<HTMLMediaElement>(null);
@@ -192,7 +196,7 @@ const MediaLayer: React.FC<{
             <div 
                 className="absolute inset-0 flex items-center justify-center transition-all"
                 style={{
-                    opacity: isVisible ? element.opacity : 0,
+                    opacity: isVisible ? element.opacity * transform.opacityMultiplier : 0,
                     pointerEvents: isVisible ? 'auto' : 'none',
                     transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale}) rotate(${transform.rotation}deg)`
                 }}
@@ -657,7 +661,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                 ctx.translate(cx, cy);
                                 ctx.rotate((transform.rotation * Math.PI) / 180);
                                 ctx.scale(transform.scale, transform.scale);
-                                ctx.globalAlpha = el.opacity * fadeMultiplier;
+                                ctx.globalAlpha = el.opacity * fadeMultiplier * transform.opacityMultiplier;
 
                                 const vEl = mediaEl as HTMLVideoElement;
                                 if (vEl.videoWidth) {
@@ -695,7 +699,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                      ctx.translate(cx, cy);
                      ctx.rotate((transform.rotation * Math.PI) / 180);
                      ctx.scale(transform.scale, transform.scale);
-                     ctx.globalAlpha = el.opacity * fadeMultiplier;
+                     ctx.globalAlpha = el.opacity * fadeMultiplier * transform.opacityMultiplier;
 
                      if (el.type === ElementType.IMAGE) {
                          const imageSrc = el.src as string | undefined;
@@ -787,7 +791,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ state, dispatch, wid
                                         className="absolute inset-0 flex items-center justify-center transition-all cursor-move hover:ring-1 hover:ring-lime-500/50"
                                         onMouseDown={(e) => handlePreviewMouseDown(e, el.id)}
                                         style={{
-                                            opacity: el.opacity,
+                                            opacity: el.opacity * transform.opacityMultiplier,
                                             transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale}) rotate(${transform.rotation}deg)`
                                         }}
                                     >
