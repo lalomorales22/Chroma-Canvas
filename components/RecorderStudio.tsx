@@ -2,12 +2,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Icons } from './Icon';
 import { ElementType, LibraryItem } from '../types';
+import { toast } from './ui/Toast';
+import {
+  PLATFORM_PRESETS,
+  PlatformId,
+  StreamDestination,
+  createDestination,
+  loadDestinations,
+  presetFor,
+  readyDestinations,
+  saveDestinations,
+} from '../services/streamDestinations';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 interface RecorderStudioProps {
-  onBack: () => void;
   onSave: (items: LibraryItem[]) => void;
+  /** Reports when recording/streaming is active so the app can lock page navigation. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 interface ActiveStream {
@@ -88,13 +100,32 @@ const createChromaKeyStream = (sourceStream: MediaStream): { stream: MediaStream
     };
 };
 
-export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }) => {
+export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyChange }) => {
     const [streams, setStreams] = useState<ActiveStream[]>([]);
     const [isRecording, setIsRecording] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
+
+    useEffect(() => {
+        onBusyChange?.(isRecording || isStreaming);
+        return () => onBusyChange?.(false);
+    }, [isRecording, isStreaming, onBusyChange]);
     const [streamStatus, setStreamStatus] = useState<'offline' | 'connecting' | 'live' | 'error'>('offline');
     const [showStreamSettings, setShowStreamSettings] = useState(false);
-    const [streamConfig, setStreamConfig] = useState({ url: 'rtmp://live.twitch.tv/app/', key: '' });
+    const [destinations, setDestinations] = useState<StreamDestination[]>(loadDestinations);
+
+    useEffect(() => {
+        saveDestinations(destinations);
+    }, [destinations]);
+
+    const updateDestination = (id: string, changes: Partial<StreamDestination>) => {
+        setDestinations(prev => prev.map(d => (d.id === id ? { ...d, ...changes } : d)));
+    };
+
+    const changeDestinationPlatform = (id: string, platform: PlatformId) => {
+        setDestinations(prev =>
+            prev.map(d => (d.id === id ? { ...d, platform, url: presetFor(platform).url } : d)),
+        );
+    };
     const [recordingTime, setRecordingTime] = useState(0);
     
     // Devices
@@ -206,7 +237,7 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                 ...s,
                 stream: undefined,
                 originalStream: undefined
-        }));
+        })) as unknown as ActiveStream[];
         const newProfiles = { ...profiles, [profileName]: serializable };
         setProfiles(newProfiles);
         localStorage.setItem('chroma_studio_profiles', JSON.stringify(newProfiles));
@@ -692,8 +723,9 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
     // --- Streaming Logic (Compositor + WebSocket) ---
 
     const startStreaming = () => {
-        if (!streamConfig.url || !streamConfig.key) {
-            alert("Please enter Stream URL and Key.");
+        const targets = readyDestinations(destinations);
+        if (targets.length === 0) {
+            toast('Enable at least one destination with a server URL and stream key.', 'error');
             return;
         }
 
@@ -747,13 +779,21 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
 
         ws.onopen = () => {
             console.log("Connected to Relay Server");
-            ws.send(JSON.stringify(streamConfig));
+            ws.send(JSON.stringify({
+                destinations: targets.map(d => ({
+                    url: d.url.trim(),
+                    key: d.key.trim(),
+                    name: presetFor(d.platform).label,
+                })),
+            }));
             setStreamStatus('live');
+            toast(`Live on ${targets.length} destination${targets.length === 1 ? '' : 's'}.`, 'success');
         };
 
         ws.onerror = () => {
             console.warn("Relay Server not found. Falling back to local archive only.");
             setStreamStatus('error');
+            toast('Relay server not reachable (npm run relay) — recording locally instead.', 'error');
             // We continue recording locally even if stream fails
         };
 
@@ -925,14 +965,16 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
         <div className="absolute inset-0 bg-black flex flex-col z-50 animate-in fade-in duration-300">
             {/* Header */}
             <div className="h-16 border-b border-zinc-800 flex items-center justify-between px-6 bg-black">
-                <div className="flex items-center gap-4">
-                    <button onClick={onBack} disabled={isRecording || isStreaming} className="p-2 hover:bg-white/10 rounded-full disabled:opacity-50">
-                        <Icons.Back className="text-white" />
-                    </button>
-                    <h1 className="text-xl font-bold flex items-center gap-2 text-white">
-                        <Icons.Layout className="text-lime-500" />
-                        Studio
-                    </h1>
+                <div className="flex items-center gap-3">
+                    <span className="text-sm font-bold text-white flex items-center gap-2">
+                        <Icons.Layout size={15} className="text-lime-500" />
+                        Live Scene
+                    </span>
+                    <span className="text-[10px] text-zinc-600 hidden sm:block">
+                        {streams.length === 0
+                            ? 'Add a source below to get started'
+                            : `${streams.length} source${streams.length === 1 ? '' : 's'} · recordings save to the Gallery`}
+                    </span>
                 </div>
                 
                 <div className="flex items-center gap-4">
@@ -1218,48 +1260,102 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
 
             {/* Stream Settings Modal */}
             {showStreamSettings && (
-                <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center">
-                    <div className="bg-black border border-zinc-800 rounded-xl p-6 w-96 shadow-2xl">
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-lg font-bold text-white flex items-center gap-2"><Icons.Signal size={18} className="text-lime-500" /> Stream Settings</h2>
+                <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4">
+                    <div className="bg-black border border-zinc-800 rounded-xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col">
+                        <div className="flex items-center justify-between mb-1">
+                            <h2 className="text-lg font-bold text-white flex items-center gap-2"><Icons.Signal size={18} className="text-lime-500" /> Multistream Settings</h2>
                             <button onClick={() => setShowStreamSettings(false)}><Icons.X size={18} className="text-gray-400 hover:text-white" /></button>
                         </div>
-                        
-                        <div className="space-y-4">
-                            <div className="space-y-1">
-                                <label className="text-xs text-gray-400 uppercase">Stream URL (RTMP)</label>
-                                <input 
-                                    type="text" 
-                                    placeholder="rtmp://live.twitch.tv/app/"
-                                    className="w-full bg-zinc-900 border border-zinc-800 rounded p-2 text-sm text-white focus:border-lime-500 focus:outline-none"
-                                    value={streamConfig.url}
-                                    onChange={e => setStreamConfig({...streamConfig, url: e.target.value})}
-                                />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-xs text-gray-400 uppercase">Stream Key</label>
-                                <input 
-                                    type="password" 
-                                    placeholder="••••••••••••"
-                                    className="w-full bg-zinc-900 border border-zinc-800 rounded p-2 text-sm text-white focus:border-lime-500 focus:outline-none"
-                                    value={streamConfig.key}
-                                    onChange={e => setStreamConfig({...streamConfig, key: e.target.value})}
-                                />
-                            </div>
-                            
+                        <p className="text-[11px] text-zinc-500 mb-4">
+                            Broadcast to every enabled destination at once — Twitch, YouTube, Kick, X, or any custom RTMP server.
+                            Keys are stored only in this browser.
+                        </p>
+
+                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-1">
+                            {destinations.map((dest) => (
+                                <div
+                                    key={dest.id}
+                                    className={`border rounded-xl p-3 space-y-2 transition-colors ${
+                                        dest.enabled ? 'border-zinc-700 bg-zinc-900/60' : 'border-zinc-800 bg-zinc-950 opacity-60'
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            title={dest.enabled ? 'Disable destination' : 'Enable destination'}
+                                            onClick={() => updateDestination(dest.id, { enabled: !dest.enabled })}
+                                            className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${
+                                                dest.enabled ? 'bg-lime-600' : 'bg-zinc-700'
+                                            }`}
+                                        >
+                                            <div
+                                                className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${
+                                                    dest.enabled ? 'left-[18px]' : 'left-0.5'
+                                                }`}
+                                            />
+                                        </button>
+                                        <select
+                                            value={dest.platform}
+                                            onChange={e => changeDestinationPlatform(dest.id, e.target.value as PlatformId)}
+                                            className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-xs text-white focus:border-lime-500 focus:outline-none font-bold"
+                                        >
+                                            {PLATFORM_PRESETS.map(p => (
+                                                <option key={p.id} value={p.id}>{p.label}</option>
+                                            ))}
+                                        </select>
+                                        <span className="flex-1 text-[10px] text-zinc-600 truncate">
+                                            {presetFor(dest.platform).keyHint}
+                                        </span>
+                                        <button
+                                            title="Remove destination"
+                                            onClick={() => setDestinations(prev => prev.filter(d => d.id !== dest.id))}
+                                            className="text-zinc-600 hover:text-red-400 shrink-0"
+                                        >
+                                            <Icons.Trash size={14} />
+                                        </button>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] text-gray-500 uppercase">Server URL (RTMP)</label>
+                                            <input
+                                                type="text"
+                                                placeholder="rtmp://…"
+                                                className="w-full bg-zinc-900 border border-zinc-800 rounded p-2 text-xs text-white focus:border-lime-500 focus:outline-none font-mono"
+                                                value={dest.url}
+                                                onChange={e => updateDestination(dest.id, { url: e.target.value })}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] text-gray-500 uppercase">Stream Key</label>
+                                            <input
+                                                type="password"
+                                                placeholder="••••••••••••"
+                                                className="w-full bg-zinc-900 border border-zinc-800 rounded p-2 text-xs text-white focus:border-lime-500 focus:outline-none font-mono"
+                                                value={dest.key}
+                                                onChange={e => updateDestination(dest.id, { key: e.target.value })}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+
+                            <button
+                                onClick={() => setDestinations(prev => [...prev, createDestination('custom')])}
+                                className="w-full py-2.5 border-2 border-dashed border-zinc-800 hover:border-lime-500/50 hover:bg-white/5 rounded-xl text-xs text-zinc-400 hover:text-white flex items-center justify-center gap-2 transition-colors"
+                            >
+                                <Icons.Plus size={14} /> Add Destination
+                            </button>
+                        </div>
+
+                        <div className="mt-4 space-y-3">
                             <div className="bg-zinc-900 border border-zinc-800 p-3 rounded text-[10px] text-gray-400">
-                                <strong>Important:</strong> Browser-based RTMP streaming requires a <b>Local Relay Server</b>.
-                                <br/><br/>
-                                1. Install dependencies: <code>npm install ws</code>
-                                <br/>
-                                2. Run: <code>node streaming-server.js</code>
-                                <br/>
-                                3. Ensure <b>ffmpeg</b> is installed on your system.
-                                <br/><br/>
-                                <button 
+                                <strong>Relay required:</strong> browsers can't speak RTMP directly, so streaming runs
+                                through the local relay (one encode, fanned out to all destinations — one platform
+                                failing won't drop the others). In a separate terminal:{' '}
+                                <code className="text-lime-400">npm run relay</code> (needs FFmpeg installed).
+                                <button
                                     onClick={() => {
-                                        navigator.clipboard.writeText("node streaming-server.js");
-                                        alert("Command copied to clipboard!");
+                                        navigator.clipboard.writeText('npm run relay');
+                                        toast('Command copied to clipboard.', 'success');
                                     }}
                                     className="mt-2 w-full py-1.5 bg-zinc-800 hover:bg-zinc-700 text-lime-400 rounded flex items-center justify-center gap-2 transition-colors border border-zinc-700"
                                 >
@@ -1267,11 +1363,15 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onBack, onSave }
                                 </button>
                             </div>
 
-                            <button 
+                            <button
                                 onClick={startStreaming}
-                                className="w-full bg-lime-700 hover:bg-lime-600 text-white font-bold py-2 rounded-lg flex items-center justify-center gap-2"
+                                disabled={readyDestinations(destinations).length === 0}
+                                className="w-full bg-lime-700 hover:bg-lime-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-2.5 rounded-lg flex items-center justify-center gap-2"
                             >
-                                <Icons.Signal size={16} /> Go Live
+                                <Icons.Signal size={16} />
+                                {readyDestinations(destinations).length > 1
+                                    ? `Go Live on ${readyDestinations(destinations).length} Platforms`
+                                    : 'Go Live'}
                             </button>
                         </div>
                     </div>
