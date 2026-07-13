@@ -10,7 +10,7 @@ interface Props {
   session: string;
 }
 
-type Status = 'starting' | 'camera-denied' | 'connecting' | 'live' | 'error';
+type Status = 'starting' | 'insecure' | 'camera-denied' | 'connecting' | 'live' | 'error';
 
 export const PhoneCameraPage: React.FC<Props> = ({ session }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -25,6 +25,12 @@ export const PhoneCameraPage: React.FC<Props> = ({ session }) => {
     let cancelled = false;
 
     const start = async () => {
+      // On http:// pages phones don't even expose navigator.mediaDevices —
+      // catch it here with real instructions instead of a cryptic undefined.
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setStatus('insecure');
+        return;
+      }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } },
@@ -97,11 +103,42 @@ export const PhoneCameraPage: React.FC<Props> = ({ session }) => {
 
   const STATUS_TEXT: Record<Status, string> = {
     starting: 'Starting camera…',
+    insecure: '',
     'camera-denied': detail,
     connecting: 'Connecting to your desktop…',
     live: '🔴 LIVE — streaming to ChromaCanvas',
     error: detail,
   };
+
+  if (status === 'insecure') {
+    return (
+      <div className="h-screen w-screen bg-black flex items-center justify-center p-6 text-white">
+        <div className="max-w-sm space-y-5 text-center">
+          <div className="text-5xl">🔒</div>
+          <h1 className="text-xl font-bold">HTTPS needed for the camera</h1>
+          <p className="text-sm text-zinc-400 leading-relaxed">
+            Phones only allow camera access on secure pages, and this page loaded over
+            plain <code className="text-zinc-200">http://</code>.
+          </p>
+          <div className="text-left bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-2 text-[13px] text-zinc-300">
+            <p>
+              <span className="font-bold text-lime-400">1.</span> On your computer, stop the dev
+              server and run <code className="text-lime-300">npm run dev:phone</code>
+            </p>
+            <p>
+              <span className="font-bold text-lime-400">2.</span> Open the{' '}
+              <code className="text-lime-300">https://</code> Network URL it prints (accept the
+              certificate warning)
+            </p>
+            <p>
+              <span className="font-bold text-lime-400">3.</span> Click Phone Camera again and
+              scan the new QR — accept the warning here too
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-screen bg-black flex flex-col text-white overflow-hidden">

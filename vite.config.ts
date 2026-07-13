@@ -1,10 +1,13 @@
 import path from 'path';
 import os from 'node:os';
+import http from 'node:http';
 import { defineConfig, loadEnv, Plugin, ViteDevServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 import { WebSocketServer, WebSocket } from 'ws';
+
+const RELAY_PORT = 4000;
 
 /**
  * Phone-as-camera support: a tiny same-origin WebRTC signaling relay
@@ -53,6 +56,68 @@ const phoneSignaling = (): Plugin => {
       }
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ ip }));
+    });
+
+    // ---- Relay proxy: same-origin bridge to the relay on localhost:4000.
+    // Browsers block ws://localhost:4000 from https:// pages (mixed content),
+    // so the page always talks to THIS server and Node pipes the rest.
+    const relayWss = new WebSocketServer({ noServer: true });
+    server.httpServer?.on('upgrade', (req, socket, head) => {
+      if (!req.url?.startsWith('/relay-ws')) return;
+      relayWss.handleUpgrade(req, socket, head, (client) => {
+        const upstream = new WebSocket(`ws://localhost:${RELAY_PORT}`);
+        const pendingToUpstream: { data: Buffer; binary: boolean }[] = [];
+
+        upstream.on('open', () => {
+          pendingToUpstream.forEach((m) => upstream.send(m.data, { binary: m.binary }));
+          pendingToUpstream.length = 0;
+        });
+        client.on('message', (data, isBinary) => {
+          const buf = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as Buffer);
+          if (upstream.readyState === WebSocket.OPEN) upstream.send(buf, { binary: isBinary });
+          else if (upstream.readyState === WebSocket.CONNECTING) {
+            pendingToUpstream.push({ data: buf, binary: isBinary });
+          }
+        });
+        upstream.on('message', (data, isBinary) => {
+          if (client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary });
+        });
+        upstream.on('error', () => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(
+              JSON.stringify({
+                type: 'status',
+                state: 'error',
+                message: 'Relay not reachable — run "npm run relay" in a separate terminal.',
+              }),
+            );
+          }
+          client.close();
+        });
+        upstream.on('close', () => client.close());
+        client.on('close', () => upstream.close());
+      });
+    });
+
+    server.middlewares.use('/relay-http', (req, res) => {
+      const proxyReq = http.request(
+        {
+          hostname: 'localhost',
+          port: RELAY_PORT,
+          path: req.url,
+          method: req.method,
+          headers: req.headers,
+        },
+        (proxyRes) => {
+          res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+          proxyRes.pipe(res);
+        },
+      );
+      proxyReq.on('error', () => {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Relay not reachable — run "npm run relay".' }));
+      });
+      req.pipe(proxyReq);
     });
   };
 

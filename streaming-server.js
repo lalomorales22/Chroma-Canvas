@@ -210,15 +210,25 @@ wss.on('connection', (ws) => {
 
     ffmpeg = spawn('ffmpeg', [...encodeArgs, ...outputArgs]);
 
+    let confirmed = false;
+    let lastErrorLine = '';
     ffmpeg.stderr.on('data', (data) => {
       const text = data.toString();
-      if (/Connection refused|Failed to connect|I\/O error|403|404/i.test(text)) {
-        console.error(`FFmpeg: ${text.trim().split('\n').pop()}`);
+      // First "frame=" progress line = encoding is genuinely flowing.
+      if (!confirmed && /frame=\s*\d+/.test(text)) {
+        confirmed = true;
+        console.log('✅ FFmpeg confirmed: frames are flowing to the destination(s).');
+        send({ type: 'status', state: 'confirmed' });
+      }
+      if (/Connection refused|Failed to connect|I\/O error|403|404|Error|Invalid/i.test(text)) {
+        const line = text.trim().split('\n').pop();
+        lastErrorLine = line;
+        console.error(`FFmpeg: ${line}`);
       }
     });
     ffmpeg.on('close', (code) => {
       console.log(`FFmpeg exited with code ${code}`);
-      send({ type: 'status', state: 'stopped', code });
+      send({ type: 'status', state: 'stopped', code, message: lastErrorLine || undefined });
     });
     ffmpeg.stdin.on('error', (e) => {
       console.log('FFmpeg stdin error (stream likely stopped):', e.message);

@@ -16,6 +16,7 @@ import {
 import { ChatDock } from './Recorder/ChatDock';
 import { PhoneCameraModal } from './Recorder/PhoneCameraModal';
 import { SmartZoomController, createSmartZoomStream } from './Recorder/smartZoom';
+import { relayWsUrl } from '../utils/relay';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -865,8 +866,9 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyCh
              s.stream.getAudioTracks().forEach(track => masterStream.addTrack(track));
         });
 
-        // Try Connecting to Relay Server
-        const ws = new WebSocket('ws://localhost:4000');
+        // Connect to the relay through the dev server's same-origin proxy
+        // (avoids mixed-content blocking on the https:// phone-camera mode).
+        const ws = new WebSocket(relayWsUrl());
         wsRef.current = ws;
 
         ws.onopen = () => {
@@ -878,14 +880,35 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyCh
                     name: presetFor(d.platform).label,
                 })),
             }));
-            setStreamStatus('live');
-            toast(`Live on ${targets.length} destination${targets.length === 1 ? '' : 's'}.`, 'success');
+            // Not "live" yet — wait for the relay to confirm FFmpeg is encoding.
+            setStreamStatus('connecting');
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const msg = JSON.parse(String(event.data));
+                if (msg.type !== 'status') return;
+                if (msg.state === 'live') {
+                    toast(`Relay started FFmpeg for ${msg.destinations?.length ?? targets.length} destination(s) — waiting for frames…`, 'info');
+                } else if (msg.state === 'confirmed') {
+                    setStreamStatus('live');
+                    toast('🔴 Frames are flowing — you are LIVE on all destinations!', 'success');
+                } else if (msg.state === 'stopped') {
+                    setStreamStatus('error');
+                    if (msg.code !== 0 && msg.code !== null) {
+                        toast(`Stream encoder exited (code ${msg.code})${msg.message ? ` — ${String(msg.message).slice(0, 120)}` : ''}`, 'error');
+                    }
+                } else if (msg.state === 'error') {
+                    setStreamStatus('error');
+                    toast(msg.message || 'Streaming failed at the relay.', 'error');
+                }
+            } catch { /* non-JSON frame */ }
         };
 
         ws.onerror = () => {
             console.warn("Relay Server not found. Falling back to local archive only.");
             setStreamStatus('error');
-            toast('Relay server not reachable (npm run relay) — recording locally instead.', 'error');
+            toast('Relay not reachable — run "npm run relay" in a terminal, then go live again.', 'error');
             // We continue recording locally even if stream fails
         };
 
@@ -1084,9 +1107,22 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyCh
                     </button>
                     {(isRecording || isStreaming) && (
                         <div className="flex items-center gap-2 font-mono text-xl animate-pulse">
-                            <div className={`w-3 h-3 rounded-full ${isStreaming ? 'bg-lime-500' : 'bg-lime-600'}`} />
-                            <span className={isStreaming ? 'text-lime-500' : 'text-lime-600'}>
-                                {isStreaming ? 'LIVE' : 'REC'} {formatTime(recordingTime)}
+                            <div className={`w-3 h-3 rounded-full ${
+                                !isStreaming ? 'bg-lime-600'
+                                : streamStatus === 'live' ? 'bg-lime-500'
+                                : streamStatus === 'error' ? 'bg-red-500'
+                                : 'bg-amber-400'
+                            }`} />
+                            <span className={
+                                !isStreaming ? 'text-lime-600'
+                                : streamStatus === 'live' ? 'text-lime-500'
+                                : streamStatus === 'error' ? 'text-red-500'
+                                : 'text-amber-400'
+                            }>
+                                {!isStreaming ? 'REC'
+                                    : streamStatus === 'live' ? 'LIVE'
+                                    : streamStatus === 'error' ? 'STREAM DOWN'
+                                    : 'CONNECTING'} {formatTime(recordingTime)}
                             </span>
                         </div>
                     )}

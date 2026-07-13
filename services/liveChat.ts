@@ -1,4 +1,5 @@
 import { uid } from '../utils/id';
+import { relayHttpUrl, relayWsUrl } from '../utils/relay';
 
 /**
  * Unified live chat — one merged feed from every platform you stream to.
@@ -46,8 +47,6 @@ export const PLATFORM_LABELS: Record<ChatPlatform, string> = {
 
 type MessageHandler = (msg: ChatMessage) => void;
 type StatusHandler = (status: ChatConnection['status'], detail?: string) => void;
-
-const RELAY_WS = 'ws://localhost:4000';
 
 // ---------------------------------------------------------------------------
 // Twitch — anonymous IRC (browser-direct)
@@ -128,7 +127,7 @@ const KICK_PUSHER_URL =
 const lookupKickChatroom = async (slug: string): Promise<number> => {
   // Numeric input = the user pasted a chatroom id directly.
   if (/^\d+$/.test(slug)) return parseInt(slug, 10);
-  const res = await fetch(`http://localhost:4000/kick/chatroom/${encodeURIComponent(slug)}`);
+  const res = await fetch(relayHttpUrl(`/kick/chatroom/${encodeURIComponent(slug)}`));
   if (!res.ok) {
     throw new Error(
       'Kick channel lookup needs the relay (npm run relay) — or paste your numeric chatroom ID instead.',
@@ -217,7 +216,7 @@ const connectYouTube = (
   let closed = false;
 
   onStatus('connecting');
-  ws = new WebSocket(RELAY_WS);
+  ws = new WebSocket(relayWsUrl());
   ws.onopen = () => {
     ws?.send(JSON.stringify({ type: 'youtube-chat', videoId }));
   };

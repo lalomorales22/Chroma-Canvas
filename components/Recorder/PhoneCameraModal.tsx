@@ -114,18 +114,31 @@ export const PhoneCameraModal: React.FC<Props> = ({ onClose, onAddStream }) => {
           </button>
         </div>
 
-        {!isSecure && (
-          <div className="bg-amber-950/50 border border-amber-700/50 rounded-lg p-3 text-left">
-            <p className="text-[11px] text-amber-200 leading-relaxed">
-              <strong>HTTPS needed:</strong> phones only allow camera access on secure pages.
-              Restart with <code className="text-amber-100">npm run dev:phone</code>, open the{' '}
-              <code className="text-amber-100">https://</code> Network URL it prints, and accept
-              the certificate warning on both devices.
+        {!isSecure ? (
+          <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-5 text-left space-y-3">
+            <p className="text-sm text-amber-300 font-bold">
+              🔒 One-time setup needed — phones only allow camera access over HTTPS.
             </p>
+            <div className="space-y-2 text-xs text-zinc-300 leading-relaxed">
+              <p>
+                <span className="font-bold text-lime-400">1.</span> Stop the dev server
+                (Ctrl+C) and start the secure one:
+              </p>
+              <code className="block bg-black border border-zinc-800 rounded px-3 py-2 text-lime-300">
+                npm run dev:phone
+              </code>
+              <p>
+                <span className="font-bold text-lime-400">2.</span> Open the{' '}
+                <code className="text-zinc-100">https://</code> <strong>Network</strong> URL it
+                prints (not localhost) and accept the certificate warning.
+              </p>
+              <p>
+                <span className="font-bold text-lime-400">3.</span> Come back here — the QR
+                will appear and your phone can connect.
+              </p>
+            </div>
           </div>
-        )}
-
-        {qr ? (
+        ) : qr ? (
           <div className="flex flex-col items-center gap-3">
             <div className="bg-white p-3 rounded-xl">
               <img src={qr} alt="Scan with your phone" width={200} height={200} />
@@ -139,7 +152,7 @@ export const PhoneCameraModal: React.FC<Props> = ({ onClose, onAddStream }) => {
         )}
 
         <div className="text-xs font-bold flex items-center justify-center gap-2">
-          {status === 'waiting' && (
+          {status === 'waiting' && isSecure && (
             <span className="text-zinc-400 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
               Scan with your phone (same Wi-Fi)…
