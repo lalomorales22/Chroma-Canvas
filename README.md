@@ -32,6 +32,13 @@ media files included — so refreshing never loses work.
 
 ### 🔴 Recorder Studio
 - Record **screen, webcam (with chroma key green screen), and mics** simultaneously
+- **📱 Phone as Camera** — scan a QR code and your phone becomes a wireless camera
+  source over WebRTC (run `npm run dev:phone` for the HTTPS mode phones require)
+- **💬 Unified Live Chat** — Twitch, Kick, and YouTube chats merged into one dock
+  (Twitch needs zero setup; Kick/YouTube use the relay), plus a **chat overlay**
+  you can drop into the scene so chat shows up on the stream itself
+- **🎯 Smart Zoom** — right-click a screen/camera source to enable, then double-click
+  anywhere to smoothly punch in 2x with a click ripple (baked into recordings & streams)
 - Live **whiteboard**, **synthesizer soundboard**, and **3D GLB model showcase** windows
 - Scene profiles and per-source recording — every take lands in the Gallery automatically
 - **Multistream live to Twitch, YouTube, Kick, X, and custom RTMP servers at once**:
@@ -86,7 +93,21 @@ brew install ffmpeg   # macOS  (Windows: winget install ffmpeg)
 npm run relay         # starts the relay on ws://localhost:4000
 ```
 
-Then hit **Stream** in the Recorder Studio, add your destinations, and go live.
+Then hit **Stream** in the Recorder Studio, add your destinations, and go live. The
+relay also powers the Kick channel lookup and the experimental YouTube live chat in
+the Unified Chat dock (Twitch chat needs no relay at all).
+
+## 📱 Phone as Camera Setup (optional)
+
+Phones only allow camera access on HTTPS pages, so use the secure dev mode:
+
+```bash
+npm run dev:phone     # HTTPS dev server with a self-signed certificate
+```
+
+Open the `https://` **Network URL** Vite prints (accept the certificate warning),
+click **Phone Camera** in the Recorder Studio, and scan the QR with your phone on the
+same Wi-Fi. Your phone's camera appears in the scene as a wireless source.
 
 ## ⌨️ Shortcuts
 
@@ -106,6 +127,8 @@ Press `?` in the app for the full cheat sheet, or `⌘K` for the command palette
 
 ```bash
 npm run dev          # vite dev server
+npm run dev:phone    # HTTPS dev server (required for Phone as Camera)
+npm run relay        # multistream + chat relay
 npm run typecheck    # strict TypeScript
 npm test             # vitest (state layer: reducer + undo history)
 npm run lint         # eslint
@@ -118,16 +141,19 @@ CI (GitHub Actions) runs typecheck + tests + build on every push and PR.
 
 ```
 state/        typed reducer + undo/redo history (transient gestures, coalescing)
-services/     IndexedDB persistence · Gemini provider · image engines · stream destinations
+services/     IndexedDB persistence · Gemini provider · image engines ·
+              stream destinations · unified live chat providers
 export/       WebCodecs frame-stepped MP4 exporter + realtime fallback
-components/   AppHeader · Canvas (timeline) · Preview · Gallery · Sidebar tabs · modals · UI
+components/   AppHeader · Canvas (timeline) · Preview · Gallery · Sidebar tabs ·
+              Recorder (ChatDock, PhoneCameraModal, smartZoom) · modals · UI
 utils/        media probing, imports, transforms, element factories
-streaming-server.js   FFmpeg multistream relay (tee fan-out)
+streaming-server.js   FFmpeg multistream relay + Kick lookup + YouTube chat poller
+vite.config.ts        includes the same-origin WebRTC signaling plugin for Phone Camera
 ```
 
 ### Built with
-React 19 · TypeScript (strict) · Vite 6 · Tailwind CSS 4 · WebCodecs · Web Audio ·
-IndexedDB · Google Gemini (`@google/genai`) · Three.js · mp4-muxer
+React 19 · TypeScript (strict) · Vite 6 · Tailwind CSS 4 · WebCodecs · WebRTC ·
+Web Audio · IndexedDB · Google Gemini (`@google/genai`) · Three.js · mp4-muxer
 
 ## 🧯 Troubleshooting
 
@@ -140,6 +166,14 @@ IndexedDB · Google Gemini (`@google/genai`) · Three.js · mp4-muxer
   terminal and FFmpeg is on your PATH.
 - **X/Kick won't accept the stream** → paste the exact regional ingest URL from that
   platform's dashboard over the preset.
+- **Phone camera QR does nothing** → phones need HTTPS: restart with
+  `npm run dev:phone`, open the `https://` Network URL on both devices, and accept the
+  certificate warning. Both devices must be on the same Wi-Fi.
+- **Kick chat says "lookup failed"** → Kick's API sometimes blocks server lookups;
+  paste your numeric chatroom ID into the field instead.
+- **YouTube chat errors** → it only works while the stream is actually live with chat
+  enabled, needs `npm run relay`, and is experimental (it uses YouTube's internal
+  endpoint, which can change without notice).
 
 ## 🗺️ Roadmap
 

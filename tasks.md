@@ -70,6 +70,21 @@ installable OBS + CapCut hybrid.
 - [x] **Frame-accurate WebCodecs export**: frame-stepped H.264 encode, offline audio
       mixdown → AAC (Opus fallback), mp4-muxer, 720p/1080p presets, live progress,
       working cancel; realtime MediaRecorder fallback for non-Chromium browsers
+- [x] **Unified Live Chat** (THE_FUTURE #5): merged Twitch + Kick + YouTube feed in a
+      Recorder Studio dock (`services/liveChat.ts`, `components/Recorder/ChatDock.tsx`);
+      Twitch is browser-direct anonymous IRC (verified live), Kick rides Pusher with a
+      relay-based chatroom lookup (Cloudflare may 403 → paste chatroom id fallback),
+      YouTube polls via the relay (experimental); canvas chat overlay addable as a
+      scene source so chat appears on stream
+- [x] **Phone as Camera** (THE_FUTURE #4): QR + WebRTC via same-origin Vite signaling
+      plugin (`/phone-signal` rooms + `/phone-lan-ip`, verified end-to-end);
+      `components/PhoneCameraPage.tsx` (phone) + `PhoneCameraModal` (desktop);
+      `npm run dev:phone` enables the HTTPS mode phones require for camera access
+- [x] **Smart Zoom** (THE_FUTURE #3, live-director version): per-source canvas
+      processor (`components/Recorder/smartZoom.ts`) — enable via right-click, then
+      double-click to ease into a 2x punch-in with click ripple, double-click to ease
+      out; baked into recordings and streams. (Fully automatic zoom-on-click needs
+      OS-level input hooks → Tauri wave.)
 - [x] **Multistreaming**: destination manager in the Recorder Studio (Twitch/YouTube/
       Kick/X presets + custom RTMP, per-destination keys & toggles, persisted locally);
       relay fans one encode out to all destinations via FFmpeg tee with onfail=ignore

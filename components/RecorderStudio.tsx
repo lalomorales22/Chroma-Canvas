@@ -13,6 +13,9 @@ import {
   readyDestinations,
   saveDestinations,
 } from '../services/streamDestinations';
+import { ChatDock } from './Recorder/ChatDock';
+import { PhoneCameraModal } from './Recorder/PhoneCameraModal';
+import { SmartZoomController, createSmartZoomStream } from './Recorder/smartZoom';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -24,7 +27,7 @@ interface RecorderStudioProps {
 
 interface ActiveStream {
     id: string;
-    type: 'SCREEN' | 'CAMERA' | 'AUDIO' | 'WHITEBOARD' | 'KEYBOARD' | 'GLB_GALLERY';
+    type: 'SCREEN' | 'CAMERA' | 'AUDIO' | 'WHITEBOARD' | 'KEYBOARD' | 'GLB_GALLERY' | 'CHAT';
     stream: MediaStream;
     originalStream?: MediaStream; // Store original for chroma key toggle
     name: string;
@@ -36,6 +39,7 @@ interface ActiveStream {
     chromaKey?: boolean;
     isDraggable?: boolean; // New: For whiteboard/piano mode
     muted?: boolean;
+    smartZoom?: boolean; // Double-click punch-in processor active
 }
 
 interface ThreeDConfig {
@@ -109,6 +113,12 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyCh
         onBusyChange?.(isRecording || isStreaming);
         return () => onBusyChange?.(false);
     }, [isRecording, isStreaming, onBusyChange]);
+
+    // Unified chat, phone camera & smart zoom
+    const [showChatDock, setShowChatDock] = useState(false);
+    const [showPhoneModal, setShowPhoneModal] = useState(false);
+    const zoomControllers = useRef<Map<string, { controller: SmartZoomController; prevStream: MediaStream }>>(new Map());
+    const sourceCleanups = useRef<Map<string, () => void>>(new Map());
     const [streamStatus, setStreamStatus] = useState<'offline' | 'connecting' | 'live' | 'error'>('offline');
     const [showStreamSettings, setShowStreamSettings] = useState(false);
     const [destinations, setDestinations] = useState<StreamDestination[]>(loadDestinations);
@@ -421,6 +431,80 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyCh
         }
     };
 
+    const addChatOverlay = (stream: MediaStream, stop: () => void) => {
+        const id = Math.random().toString(36).substr(2, 9);
+        sourceCleanups.current.set(id, stop);
+        setStreams(prev => [...prev, {
+            id,
+            type: 'CHAT',
+            stream,
+            name: 'Live Chat Overlay',
+            x: 40,
+            y: 80,
+            width: 280,
+            height: 380,
+            isDraggable: true
+        }]);
+    };
+
+    const addPhoneCamera = (stream: MediaStream, cleanup: () => void) => {
+        const id = Math.random().toString(36).substr(2, 9);
+        sourceCleanups.current.set(id, cleanup);
+        const track = stream.getVideoTracks()[0];
+        track.onended = () => removeStream(id);
+        setStreams(prev => [...prev, {
+            id,
+            type: 'CAMERA',
+            stream,
+            originalStream: stream,
+            name: '📱 Phone Camera',
+            x: 120,
+            y: 120,
+            width: 320,
+            height: 240,
+            isDraggable: true
+        }]);
+        toast('Phone camera connected and added to the scene!', 'success');
+    };
+
+    const toggleSmartZoom = (id: string) => {
+        const s = streams.find(st => st.id === id);
+        if (!s) return;
+        const existing = zoomControllers.current.get(id);
+        if (existing) {
+            existing.controller.stop();
+            zoomControllers.current.delete(id);
+            setStreams(prev => prev.map(st =>
+                st.id === id ? { ...st, stream: existing.prevStream, smartZoom: false } : st
+            ));
+        } else {
+            const controller = createSmartZoomStream(s.stream);
+            zoomControllers.current.set(id, { controller, prevStream: s.stream });
+            setStreams(prev => prev.map(st =>
+                st.id === id ? { ...st, stream: controller.stream, smartZoom: true } : st
+            ));
+            toast('Smart Zoom on — double-click anywhere on the source to punch in / out.', 'success');
+        }
+        setContextMenu(null);
+    };
+
+    const handleSourceDoubleClick = (e: React.MouseEvent, id: string) => {
+        const entry = zoomControllers.current.get(id);
+        if (!entry) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (entry.controller.isZoomed()) {
+            entry.controller.reset();
+        } else {
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            entry.controller.setTarget(
+                (e.clientX - rect.left) / rect.width,
+                (e.clientY - rect.top) / rect.height,
+                2,
+            );
+        }
+    };
+
     const addWhiteboard = (x: number, y: number) => {
         const id = Math.random().toString(36).substr(2, 9);
         setStreams(prev => [...prev, {
@@ -557,6 +641,14 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyCh
         if (chromaProcessors.current.has(id)) {
             chromaProcessors.current.get(id)?.stop();
             chromaProcessors.current.delete(id);
+        }
+        if (zoomControllers.current.has(id)) {
+            zoomControllers.current.get(id)?.controller.stop();
+            zoomControllers.current.delete(id);
+        }
+        if (sourceCleanups.current.has(id)) {
+            sourceCleanups.current.get(id)?.();
+            sourceCleanups.current.delete(id);
         }
         setStreams(prev => {
             const streamToRemove = prev.find(s => s.id === id);
@@ -978,6 +1070,18 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyCh
                 </div>
                 
                 <div className="flex items-center gap-4">
+                    <button
+                        onClick={() => setShowChatDock(v => !v)}
+                        title="Unified live chat (Twitch + Kick + YouTube)"
+                        className={`flex items-center gap-2 px-3 py-2 rounded-full font-bold text-xs transition-all border ${
+                            showChatDock
+                                ? 'bg-lime-900/60 border-lime-600 text-lime-300'
+                                : 'bg-zinc-900 border-zinc-800 text-gray-400 hover:text-white hover:bg-zinc-800'
+                        }`}
+                    >
+                        <Icons.Signal size={13} />
+                        Chat
+                    </button>
                     {(isRecording || isStreaming) && (
                         <div className="flex items-center gap-2 font-mono text-xl animate-pulse">
                             <div className={`w-3 h-3 rounded-full ${isStreaming ? 'bg-lime-500' : 'bg-lime-600'}`} />
@@ -1120,8 +1224,8 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyCh
                                 <p className="text-[10px] text-gray-400">Playable piano.</p>
                             </div>
 
-                            <div 
-                                draggable 
+                            <div
+                                draggable
                                 onDragStart={(e) => e.dataTransfer.setData('sourceType', 'GLB_GALLERY')}
                                 className="bg-black p-4 rounded-xl cursor-grab hover:bg-zinc-900 border border-zinc-800 hover:border-lime-500 transition-all group"
                             >
@@ -1131,6 +1235,28 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyCh
                                 </div>
                                 <p className="text-[10px] text-gray-400">Import & Showcase GLB/GLTF Models.</p>
                             </div>
+
+                            <button
+                                onClick={() => setShowPhoneModal(true)}
+                                className="w-full text-left bg-black p-4 rounded-xl cursor-pointer hover:bg-zinc-900 border border-zinc-800 hover:border-lime-500 transition-all group"
+                            >
+                                <div className="flex items-center gap-3 mb-2 text-lime-400 group-hover:text-lime-300">
+                                    <Icons.Portrait />
+                                    <span className="font-bold text-sm">Phone Camera</span>
+                                </div>
+                                <p className="text-[10px] text-gray-400">Scan a QR — your phone becomes a wireless camera.</p>
+                            </button>
+
+                            <button
+                                onClick={() => setShowChatDock(v => !v)}
+                                className="w-full text-left bg-black p-4 rounded-xl cursor-pointer hover:bg-zinc-900 border border-zinc-800 hover:border-lime-500 transition-all group"
+                            >
+                                <div className="flex items-center gap-3 mb-2 text-lime-400 group-hover:text-lime-300">
+                                    <Icons.Signal />
+                                    <span className="font-bold text-sm">Live Chat</span>
+                                </div>
+                                <p className="text-[10px] text-gray-400">Twitch + Kick + YouTube chats merged into one feed.</p>
+                            </button>
                         </div>
                     </div>
 
@@ -1200,7 +1326,11 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyCh
                             </div>
                             
                             {/* Content */}
-                            <div className="w-full h-full overflow-hidden relative">
+                            <div
+                                className="w-full h-full overflow-hidden relative"
+                                onDoubleClick={(e) => handleSourceDoubleClick(e, stream.id)}
+                                title={stream.smartZoom ? 'Double-click to punch in / out' : undefined}
+                            >
                                 {stream.type === 'AUDIO' ? (
                                     <div className={`w-full h-full flex flex-col items-center justify-center bg-black ${stream.muted ? 'opacity-50' : ''}`}>
                                         <Icons.Mic className={`w-8 h-8 mb-2 ${stream.muted ? 'text-gray-500' : 'text-lime-500 animate-pulse'}`} />
@@ -1255,8 +1385,22 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyCh
                             </div>
                         </div>
                     ))}
+
+                    {showChatDock && (
+                        <ChatDock
+                            onAddOverlay={addChatOverlay}
+                            onClose={() => setShowChatDock(false)}
+                        />
+                    )}
                 </div>
             </div>
+
+            {showPhoneModal && (
+                <PhoneCameraModal
+                    onClose={() => setShowPhoneModal(false)}
+                    onAddStream={addPhoneCamera}
+                />
+            )}
 
             {/* Stream Settings Modal */}
             {showStreamSettings && (
@@ -1531,6 +1675,12 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyCh
                              <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => { add3DViewer(contextMenu.x, contextMenu.y); setContextMenu(null); }}>
                                  <Icons.Box size={14} /> 3D Objects
                              </button>
+                             <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => { setShowPhoneModal(true); setContextMenu(null); }}>
+                                 <Icons.Portrait size={14} /> Phone Camera
+                             </button>
+                             <button className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2" onClick={() => { setShowChatDock(true); setContextMenu(null); }}>
+                                 <Icons.Signal size={14} /> Live Chat
+                             </button>
                         </>
                     ) : (
                         <>
@@ -1590,9 +1740,19 @@ export const RecorderStudio: React.FC<RecorderStudioProps> = ({ onSave, onBusyCh
                                 </>
                             )}
                             
+                            {/* Smart Zoom Toggle */}
+                            {['SCREEN', 'CAMERA'].includes(streams.find(s => s.id === contextMenu.streamId)?.type ?? '') && (
+                                <button
+                                    className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2 text-lime-400"
+                                    onClick={() => toggleSmartZoom(contextMenu.streamId!)}
+                                >
+                                    <Icons.ZoomIn size={14} /> {streams.find(s => s.id === contextMenu.streamId)?.smartZoom ? 'Disable' : 'Enable'} Smart Zoom
+                                </button>
+                            )}
+
                             {/* Chroma Key Toggle */}
                             {streams.find(s => s.id === contextMenu.streamId)?.type === 'CAMERA' && (
-                                <button 
+                                <button
                                     className="w-full text-left px-4 py-2 hover:bg-zinc-900 flex items-center gap-2 text-lime-400"
                                     onClick={() => toggleChromaKey(contextMenu.streamId!)}
                                 >
